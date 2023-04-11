@@ -1,0 +1,28 @@
+hw4.cu(59): warning: missing return statement at end of non-void function "decode"
+
+hw4.cu(77): warning: expression has no effect
+
+hw4.cu(77): warning: expression has no effect
+
+hw4.cu(222): warning: result of call is not used
+
+hw4.cu(354): warning: result of call is not used
+
+hw4.cu(59): warning: missing return statement at end of non-void function "decode"
+
+hw4.cu(77): warning: expression has no effect
+
+hw4.cu(77): warning: expression has no effect
+
+hw4.cu(222): warning: result of call is not used
+
+hw4.cu(354): warning: result of call is not used
+
+hw4.cu: In function 'void solve(FILE*, FILE*)':
+hw4.cu:222:7: warning: ignoring return value of 'int fscanf(FILE*, const char*, ...)', declared with attribute warn_unused_result [-Wunused-result]
+     fscanf(fin, "%d\n", &tx);
+     ~~^~~~~~~~~~~~~~~~~~
+hw4.cu: In function 'int main(int, char**)':
+hw4.cu:354:7: warning: ignoring return value of 'int fscanf(FILE*, const char*, ...)', declared with attribute warn_unused_result [-Wunused-result]
+     fscanf(fin, "%d\n", &totalblock);
+     ~~^~~~~~~~~~~~~~~~~~~~~~~~~~
