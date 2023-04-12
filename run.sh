@@ -5,7 +5,7 @@ cd ~/hw4
 make clean; make 2> make-stderr.out
 RunFile=./hw4
 
-testCase=00
+testCase=03
 
 inFile=./testcases/case$testCase.in
 
