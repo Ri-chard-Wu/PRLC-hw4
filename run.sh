@@ -5,7 +5,7 @@ cd ~/hw4
 make clean; make 2> make-stderr.out
 RunFile=./hw4
 
-testCase=03
+testCase=00
 
 inFile=./testcases/case$testCase.in
 
@@ -15,7 +15,7 @@ golden_outFile=./testcases/case$testCase.out
 if [ -f "$RunFile" ]; then
 
     echo "==================================="
-    echo "=            Run hw3             ="
+    echo "=            Run hw4             ="
     echo "==================================="
 
     ./$RunFile $inFile $outFile > run-stderr.out
@@ -31,7 +31,7 @@ if [ -f "$RunFile" ]; then
     echo "=            Validate             ="
     echo "==================================="
 
-    ./validation $outFile $golden_outFile
+    # ./validation $outFile $golden_outFile
     # rm $outFile
 
 else

@@ -43,19 +43,24 @@ __device__ void f1(int *a){
     f2(a);
 }
 
-__global__ void kernel(int *b)
+__constant__ int k[3] = {23, 456, 77};
+
+__global__ void kernel()
 {
+
+    printf("blockIDx.x: %d\n", blockIDx.x);
 
     // *b = 23111;
 
-    printf("kernel()\n");
+
+    // printf("kernel()\n");
 
 
-    int a[3];
-    f1(a);
+    // int a[3];
+    // f1(a);
 
-    printf("a[0]: %d\n", a[0]);
-    printf("a[1]: %d\n", a[1]);
+    // printf("a[0]: %d\n", a[0]);
+    // printf("a[1]: %d\n", a[1]);
 
 
 
@@ -82,25 +87,32 @@ __global__ void kernel(int *b)
 
 
 
+#define nTasks_exp 32
+#define nTskPerThrd_exp 16
+#define nThrd_exp (nTasks_exp - nTskPerThrd_exp)
+#define nThrdPerBlk_exp 9   // 2^9 == 512.
 
+#define nBlks (1 << (nThrd_exp - nThrdPerBlk_exp))
+#define nThrdPerBlk (1 << (nThrdPerBlk_exp))
 
 int main(int argc, char **argv)
 {
 
+    // printf("nBlks: %d\n", nBlks);
 
-    int *b_dev, b_host;
+    // int *b_dev, b_host;
 
-    cudaMalloc(&b_dev, sizeof(int));
+    // cudaMalloc(&b_dev, sizeof(int));
 
-    cudaMemset(b_dev, 0, sizeof(int));
+    // cudaMemset(b_dev, 0, sizeof(int));
 
-    kernel<<<2, 5>>>(b_dev); 
+    kernel<<<2, 5>>>(); 
 
-    cudaMemcpy(&b_host, b_dev, sizeof(int), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(&b_host, b_dev, sizeof(int), cudaMemcpyDeviceToHost);
 
-    printf("b_host: %d\n", b_host);
+    // printf("b_host: %d\n", b_host);
 
-    printf("main()\n");
+    // printf("main()\n");
     cudaDeviceSynchronize();
 
     return 0;

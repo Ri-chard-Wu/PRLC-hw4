@@ -1,1 +1,2 @@
-sizeof(block): 80
+calc_merkle_root() time: 10886 us
+nonceSearch() time: 12962281 us

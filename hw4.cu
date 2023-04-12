@@ -9,13 +9,153 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-
 #include <cstdio>
 #include <cstring>
-
 #include <cassert>
+#include <chrono>
 
 #include "sha256.h"
+using namespace std::chrono;
+using namespace std;
+
+#define N_TSK_EXP 32
+#define N_TSK_PER_THRD_EXP 16
+#define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP)
+#define N_THRD_PER_BLK_EXP 9   // 2^9 == 512.
+
+#define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP))
+#define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP))
+#define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP))
+
+
+
+
+
+
+
+__device__
+void sha256_transform_dev(SHA256 *ctx, const BYTE *msg){
+	WORD a, b, c, d, e, f, g, h;
+	WORD i, j;
+	
+
+	WORD w[64];
+
+	for(i=0, j=0; i < 16; ++i, j += 4)
+	{
+		w[i] = (msg[j]<<24) | (msg[j+1]<<16) | (msg[j+2]<<8) | (msg[j+3]);
+	}
+	
+
+	for( i = 16; i < 64; ++i)
+	{
+		WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
+		WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
+		w[i] = w[i-16] + s0 + w[i-7] + s1;
+	}
+	
+
+	a = ctx->h[0];
+	b = ctx->h[1];
+	c = ctx->h[2];
+	d = ctx->h[3];
+	e = ctx->h[4];
+	f = ctx->h[5];
+	g = ctx->h[6];
+	h = ctx->h[7];
+	
+
+	for(i=0;i<64;++i)
+	{
+		WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
+		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
+		WORD ch = (e & f) ^ ((~e) & g);
+		WORD maj = (a & b) ^ (a & c) ^ (b & c);
+		WORD temp1 = h + S1 + ch + k_dev[i] + w[i];
+		WORD temp2 = S0 + maj;
+		
+		h = g;
+		g = f;
+		f = e;
+		e = d + temp1;
+		d = c;
+		c = b;
+		b = a;
+		a = temp1 + temp2;
+	}
+	
+	ctx->h[0] += a;
+	ctx->h[1] += b;
+	ctx->h[2] += c;
+	ctx->h[3] += d;
+	ctx->h[4] += e;
+	ctx->h[5] += f;
+	ctx->h[6] += g;
+	ctx->h[7] += h;
+}
+
+
+
+
+
+__device__ 
+void sha256_dev(SHA256 *ctx, const BYTE *msg, size_t len){
+	
+	ctx->h[0] = 0x6a09e667;
+	ctx->h[1] = 0xbb67ae85;
+	ctx->h[2] = 0x3c6ef372;
+	ctx->h[3] = 0xa54ff53a;
+	ctx->h[4] = 0x510e527f;
+	ctx->h[5] = 0x9b05688c;
+	ctx->h[6] = 0x1f83d9ab;
+	ctx->h[7] = 0x5be0cd19;
+	
+	WORD i, j;
+	size_t remain = len % 64;
+	size_t total_len = len - remain;
+
+	for(i=0; i < total_len; i += 64) 
+	{
+		
+		sha256_transform_dev(ctx, &msg[i]);
+	}
+	
+	BYTE m[64] = {};
+	for(i=total_len, j=0; i < len; ++i, ++j) 
+	{
+		m[j] = msg[i];
+	}
+
+	m[j++] = 0x80;  
+	
+	if(j > 56) // never true?
+	{
+		sha256_transform_dev(ctx, m);
+		memset(m, 0, sizeof(m));
+		printf("true\n");
+	}
+	
+	unsigned long long L = len * 8;  
+	m[63] = L;
+	m[62] = L >> 8;
+	m[61] = L >> 16;
+	m[60] = L >> 24;
+	m[59] = L >> 32;
+	m[58] = L >> 40;
+	m[57] = L >> 48;
+	m[56] = L >> 56;
+	sha256_transform_dev(ctx, m);
+	
+	for(i=0;i<32;i+=4)
+	{
+        _swap(ctx->b[i], ctx->b[i+3]);
+        _swap(ctx->b[i+1], ctx->b[i+2]);
+	}
+}
+
+
+
+
 
 
 
@@ -61,17 +201,6 @@ unsigned char decode(unsigned char c)
             return c-'0';
     }
 }
-
-
-
-
-// convert hex string to binary
-//
-// in: input string
-// string_len: the length of the input string
-//      '\0' is not included in string_len!!!
-// out: output bytes array
-
 
 
 
@@ -160,6 +289,8 @@ void double_sha256(SHA256 *sha256_ctx, unsigned char *bytes, size_t len)
 }
 
 
+
+
 __device__ 
 void double_sha256_dev(SHA256 *sha256_ctx, unsigned char *bytes, size_t len){
     SHA256 tmp;
@@ -230,7 +361,7 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValidDev)
 {
 
-    int gtid = blockIDx.x * blockDim.x + threadIdx.x;
+    int gtid = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = threadIdx.x;
 
     __shared__ unsigned char sm_blkHdr[BLK_HDR_SIZE];
@@ -245,7 +376,7 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
 
     __syncthreads();
     
-    for(int i = 0; i < BLK_HDR_SIZE; i++){
+    for(int i = 0; i < BLK_HDR_SIZE; i++){ // broadcast-type access to sm.
         ptr[i] = sm_blkHdr[i];
     }
     
@@ -268,8 +399,8 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
 
     SHA256 sha256_ctx;
     
-    for(blk.nonce = gtid * nTskPerThrd; \
-                    blk.nonce < (gtid + 1) * nTskPerThrd; ++blk.nonce) 
+    for(blk.nonce = gtid * N_TSK_PER_THRD; \
+                    blk.nonce < (gtid + 1) * N_TSK_PER_THRD; ++blk.nonce) 
     {   
         double_sha256_dev(&sha256_ctx, (unsigned char*)&blk, BLK_HDR_SIZE);
  
@@ -316,7 +447,17 @@ void solve(FILE *fin, FILE *fout)
 
     // **** calculate merkle root ****
     unsigned char merkle_root[32];
+    
+
+
+    auto start = high_resolution_clock::now();
+    
     calc_merkle_root(merkle_root, tx, merkle_branch);
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+    cout<<"calc_merkle_root() time: "<<duration.count()<<" us"<<endl;
+
 
 
     HashBlock block;
@@ -329,62 +470,31 @@ void solve(FILE *fin, FILE *fout)
     convert_string_to_little_endian_bytes((unsigned char *)&block.nbits,   nbits,     8);
     convert_string_to_little_endian_bytes((unsigned char *)&block.ntime,   ntime,     8);
     block.nonce = 0;
-    
-    
-    // ********** calculate target value *********
-    // unsigned int exp = block.nbits >> 24;
-    // unsigned int mant = block.nbits & 0xffffff;
-    // unsigned char target_hex[32] = {};
-    
-    // unsigned int shift = 8 * (exp - 3);
-    // unsigned int sb = shift / 8; 
-    // unsigned int rb = shift % 8; 
-    
 
-    // target_hex[sb    ] = (mant << rb);      
-    // target_hex[sb + 1] = (mant >> (8-rb));  
-    // target_hex[sb + 2] = (mant >> (16-rb)); 
-    // target_hex[sb + 3] = (mant >> (24-rb)); 
-
-    
-    // SHA256 sha256_ctx;
-    
-    // for(block.nonce = 0x00000000; block.nonce <= 0xffffffff; ++block.nonce) 
-    // {   
-    //     double_sha256(&sha256_ctx, (unsigned char*)&block, sizeof(block));
- 
-    //     if(little_endian_bit_comparison(sha256_ctx.b, target_hex, 32) < 0)  
-    //     {
-    //         break;
-    //     }
-    // }
-
-    unsigned int nTasks_exp = 32;
-    unsigned int nTskPerThrd_exp = 16;
-    unsigned int nThrd_exp = nTasks_exp - nTskPerThrd_exp;
-    unsigned int nThrdPerBlk_exp = 9; // 2^9 == 512.
-
-    unsigned int nBlks = 1 << (nThrd_exp - nThrdPerBlk_exp);
-    unsigned int nThrdPerBlk = 1 << (nThrdPerBlk_exp);
 
     unsigned char *blockHeaderDev;
     unsigned int *nonceValidDev;
     unsigned int nonceValidHost = 0;
 
     cudaMalloc(&blockHeaderDev, BLK_HDR_SIZE);
-    cudaMemcpy(blockHeader, (unsigned char*)&block,
+    cudaMemcpy(blockHeaderDev, (unsigned char*)&block,
                          BLK_HDR_SIZE, cudaMemcpyHostToDevice);
 
     cudaMalloc(&nonceValidDev, sizeof(int));
     cudaMemset(nonceValidDev, 0, sizeof(int));
     
-    nonceSearch<<< nBlks, nThrdPerBlk >>> (blockHeaderDev, nonceValidDev); 
 
-    // cudaDeviceSynchronize();
+    start = high_resolution_clock::now();
+
+    nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev); 
 
     while(!nonceValidHost){
         cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
     }
+
+    stop = high_resolution_clock::now();
+    duration = duration_cast<microseconds>(stop - start);
+    cout<<"nonceSearch() time: "<<duration.count()<<" us"<<endl;
 
     
     for(int i=0; i < 4; ++i)
@@ -392,6 +502,8 @@ void solve(FILE *fin, FILE *fout)
         fprintf(fout, "%02x", ((unsigned char *)&nonceValidHost)[i]);
     }
     fprintf(fout, "\n");
+
+    
 
 
     delete[] merkle_branch;
