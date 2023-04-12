@@ -31,7 +31,7 @@ if [ -f "$RunFile" ]; then
     echo "=            Validate             ="
     echo "==================================="
 
-    ./Validation $outFile $golden_outFile
+    ./validation $outFile $golden_outFile
     # rm $outFile
 
 else

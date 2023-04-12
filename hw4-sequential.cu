@@ -163,7 +163,10 @@ void double_sha256(SHA256 *sha256_ctx, unsigned char *bytes, size_t len)
 
 
 
-
+// calculate merkle root from several merkle branches
+// root: output hash will store here (little-endian)
+// branch: merkle branch  (big-endian)
+// count: total number of transactions or merkle branch
 void calc_merkle_root(unsigned char *root, int count, char **branch)
 {
     size_t total_count = count; // merkle branch
@@ -197,7 +200,9 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 
         for(i=0, j=0; i < total_count; i += 2, ++j)
         {
-
+            // this part is slightly tricky,
+            //   because of the implementation of the double_sha256,
+            //   we can avoid the memory begin overwritten during our sha256d calculation
             // double_sha:
             //     tmp = hash(list[0]+list[1])
             //     list[0] = hash(tmp)
@@ -228,11 +233,12 @@ void solve(FILE *fin, FILE *fout)
     char *raw_merkle_branch;
     char **merkle_branch;
 
-    getline(version, 9, fin);   
-    getline(prevhash, 65, fin); 
+    getline(version, 9, fin);   // read 9 char's, starting from ofst 0.
+    getline(prevhash, 65, fin); // read 65 char's, starting from ofst 9.
     getline(ntime, 9, fin);
     getline(nbits, 9, fin);
     fscanf(fin, "%d\n", &tx);
+    printf("start hashing");
 
     raw_merkle_branch = new char [tx * 65];
     merkle_branch = new char *[tx];
@@ -245,9 +251,27 @@ void solve(FILE *fin, FILE *fout)
     }
 
     // **** calculate merkle root ****
+
     unsigned char merkle_root[32];
     calc_merkle_root(merkle_root, tx, merkle_branch);
 
+    printf("merkle root(little): ");
+    print_hex(merkle_root, 32);
+    printf("\n");
+
+    printf("merkle root(big):    ");
+    print_hex_inverse(merkle_root, 32);
+    printf("\n");
+
+
+    // **** solve block ****
+    printf("Block info (big): \n");
+    printf("  version:  %s\n", version);
+    printf("  pervhash: %s\n", prevhash);
+    printf("  merkleroot: "); print_hex_inverse(merkle_root, 32); printf("\n");
+    printf("  nbits:    %s\n", nbits);
+    printf("  ntime:    %s\n", ntime);
+    printf("  nonce:    ???\n\n");
 
     HashBlock block;
 
@@ -261,53 +285,67 @@ void solve(FILE *fin, FILE *fout)
     
     
     // ********** calculate target value *********
+    // calculate target value from encoded difficulty which is encoded on "nbits"
     unsigned int exp = block.nbits >> 24;
     unsigned int mant = block.nbits & 0xffffff;
     unsigned char target_hex[32] = {};
     
     unsigned int shift = 8 * (exp - 3);
-    unsigned int sb = shift / 8; 
-    unsigned int rb = shift % 8; 
+    unsigned int sb = shift / 8; // always == exp - 3?
+    unsigned int rb = shift % 8; // always == 0?
+    
+    // little-endian
+    target_hex[sb    ] = (mant << rb);      // >> 0?
+    target_hex[sb + 1] = (mant >> (8-rb));  // >> 8?
+    target_hex[sb + 2] = (mant >> (16-rb)); // >> 16?
+    target_hex[sb + 3] = (mant >> (24-rb)); // >> 24?
+    
+    
+    printf("Target value (big): ");
+    print_hex_inverse(target_hex, 32);
+    printf("\n");
+
+
+    // ********** find nonce **************
+    
+    SHA256 sha256_ctx;
+    
+    // try all posible nonce values?
+    for(block.nonce = 0x00000000; block.nonce <= 0xffffffff; ++block.nonce) // 2^32 iterations.
+    {   
+        // hash the entire block header info.
+        double_sha256(&sha256_ctx, (unsigned char*)&block, sizeof(block));
+        // if(block.nonce % 1000000 == 0)
+        // {
+        //     printf("hash #%10u (big): ", block.nonce);
+        //     print_hex_inverse(sha256_ctx.b, 32);
+        //     printf("\n");
+        // }
+        
+        // sha256_ctx < target_hex
+        if(little_endian_bit_comparison(sha256_ctx.b, target_hex, 32) < 0)  
+        {
+            printf("Found Solution!!\n");
+            printf("hash #%10u (big): ", block.nonce);
+            print_hex_inverse(sha256_ctx.b, 32);
+            printf("\n\n");
+
+            break;
+        }
+    }
     
 
-    target_hex[sb    ] = (mant << rb);      
-    target_hex[sb + 1] = (mant >> (8-rb));  
-    target_hex[sb + 2] = (mant >> (16-rb)); 
-    target_hex[sb + 3] = (mant >> (24-rb)); 
+    // print result
 
-    
-    // SHA256 sha256_ctx;
-    
-    // for(block.nonce = 0x00000000; block.nonce <= 0xffffffff; ++block.nonce) 
-    // {   
-    //     double_sha256(&sha256_ctx, (unsigned char*)&block, sizeof(block));
- 
-    //     if(little_endian_bit_comparison(sha256_ctx.b, target_hex, 32) < 0)  
-    //     {
-    //         break;
-    //     }
-    // }
+    //little-endian
+    printf("hash(little): ");
+    print_hex(sha256_ctx.b, 32);
+    printf("\n");
 
-    unsigned long long nTasks = 1 << 32;
-    unsigned int nTasksPerThread = 65536;
-    unsigned int nThreads = nTasks / nTasksPerThread;
-    unsigned int nThreadsPerBlock = 512;
-
-    unsigned char *blockHeader, *nonceValid;
-
-    cudaMalloc(&blockHeader, sizeof(block));
-    cudaMemcpy(blockHeader, block, sizeof(block), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&nonceValid, 4 * sizeof(unsigned char));
-    solve<<< nThreads / nThreadsPerBlock, nThreadsPerBlock>>>(blockHeader, nonceValid); 
-
-
-
-
-
-
-
-
+    //big-endian
+    printf("hash(big):    ");
+    print_hex_inverse(sha256_ctx.b, 32);
+    printf("\n\n");
 
     for(int i=0;i<4;++i)
     {
@@ -315,42 +353,9 @@ void solve(FILE *fin, FILE *fout)
     }
     fprintf(fout, "\n");
 
-
     delete[] merkle_branch;
     delete[] raw_merkle_branch;
 }
-
-
-
-
-
-__global__ void sobel(unsigned char *s, unsigned char *t, 
-                                unsigned height, unsigned width, unsigned channels)
-{
-    const unsigned short tidx_z = threadIdx.x;
-    const unsigned short tidx_x = threadIdx.y;
-    const unsigned short tidx_y = threadIdx.z;
-    const int bidx_z = blockIdx.x;
-    const int bidx_x = blockIdx.y;
-    const int bidx_y = blockIdx.z;
-    const int bdim_z = blockDim.x;
-    const int bdim_x = blockDim.y;
-    const int bdim_y = blockDim.z;
-    const int basez = bidx_z * bdim_z;
-    const int basex = bidx_x * bdim_x;
-    const int basey = bidx_y * bdim_y;
-    const int z = basez + tidx_z;
-    const int x = basex + tidx_x;
-    const int y = basey + tidx_y; 
-
-    __shared__ unsigned char smSrc[3 * (BLOCK_N_X + 4) * (BLOCK_N_Y + 4)];
-    int idx_raw;
-    const unsigned long long n_pixels = width * height;
-    
-    if(x > width + 4 - 1 || y > height + 4 - 1) return;
-}
-
-
 
 
 
@@ -370,7 +375,7 @@ int main(int argc, char **argv)
     fscanf(fin, "%d\n", &totalblock);
     fprintf(fout, "%d\n", totalblock);
 
-    for(int i=0; i < totalblock; ++i)
+    for(int i=0;i<totalblock;++i)
     {
         solve(fin, fout);
     }
