@@ -226,6 +226,66 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 
 
 
+
+__global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValidDev)
+{
+
+    int gtid = blockIDx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
+
+    __shared__ unsigned char sm_blkHdr[BLK_HDR_SIZE];
+
+    HashBlock blk;
+    unsigned char* ptr;
+    ptr = ((unsigned char*)&blk);
+
+    if(tid < BLK_HDR_SIZE){
+        sm_blkHdr[tid] = blockHeader[tid];
+    }
+
+    __syncthreads();
+    
+    for(int i = 0; i < BLK_HDR_SIZE; i++){
+        ptr[i] = sm_blkHdr[i];
+    }
+    
+
+
+    unsigned int exp = blk.nbits >> 24;
+    unsigned int mant = blk.nbits & 0xffffff;
+    unsigned char target_hex[32] = {};
+    
+    unsigned int shift = 8 * (exp - 3);
+    unsigned int sb = shift / 8; 
+    unsigned int rb = shift % 8; 
+    
+    target_hex[sb    ] = (mant << rb);      
+    target_hex[sb + 1] = (mant >> (8-rb));  
+    target_hex[sb + 2] = (mant >> (16-rb)); 
+    target_hex[sb + 3] = (mant >> (24-rb)); 
+
+
+
+    SHA256 sha256_ctx;
+    
+    for(blk.nonce = gtid * nTskPerThrd; \
+                    blk.nonce < (gtid + 1) * nTskPerThrd; ++blk.nonce) 
+    {   
+        double_sha256_dev(&sha256_ctx, (unsigned char*)&blk, BLK_HDR_SIZE);
+ 
+        if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
+        {
+            *nonceValidDev = blk.nonce;
+            break;
+        }
+    }
+}
+
+
+
+
+
+
 void solve(FILE *fin, FILE *fout)
 {
 
@@ -299,23 +359,26 @@ void solve(FILE *fin, FILE *fout)
     //     }
     // }
 
-    unsigned long long nTasks = 1 << 32;
-    unsigned int nTskPerThrd = 65536;
-    unsigned int nThrd = nTasks / nTskPerThrd;
-    unsigned int nThrdPerBlk = 512;
+    unsigned int nTasks_exp = 32;
+    unsigned int nTskPerThrd_exp = 16;
+    unsigned int nThrd_exp = nTasks_exp - nTskPerThrd_exp;
+    unsigned int nThrdPerBlk_exp = 9; // 2^9 == 512.
 
-    unsigned char *blockHeader;
+    unsigned int nBlks = 1 << (nThrd_exp - nThrdPerBlk_exp);
+    unsigned int nThrdPerBlk = 1 << (nThrdPerBlk_exp);
+
+    unsigned char *blockHeaderDev;
     unsigned int *nonceValidDev;
     unsigned int nonceValidHost = 0;
 
-    cudaMalloc(&blockHeader, BLK_HDR_SIZE);
+    cudaMalloc(&blockHeaderDev, BLK_HDR_SIZE);
     cudaMemcpy(blockHeader, (unsigned char*)&block,
                          BLK_HDR_SIZE, cudaMemcpyHostToDevice);
 
     cudaMalloc(&nonceValidDev, sizeof(int));
     cudaMemset(nonceValidDev, 0, sizeof(int));
     
-    nonceSearch<<< nThrd / nThrdPerBlk, nThrdPerBlk>>>(blockHeader, nonceValidDev); 
+    nonceSearch<<< nBlks, nThrdPerBlk >>> (blockHeaderDev, nonceValidDev); 
 
     // cudaDeviceSynchronize();
 
@@ -335,72 +398,6 @@ void solve(FILE *fin, FILE *fout)
     delete[] raw_merkle_branch;
 }
 
-
-
-
-
-__global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValidDev)
-{
-
-    // BLK_HDR_SIZE
-
-    int gtid = blockIDx.x * blockDim.x + threadIdx.x;
-    int tid = threadIdx.x;
-
-    __shared__ unsigned char sm_blkHdr[BLK_HDR_SIZE];
-    __shared__ unsigned char sm_found[4];
-    sm_found[0] = 0;
-
-
-    HashBlock blk;
-    unsigned char* ptr;
-    ptr = ((unsigned char*)&blk);
-
-    if(tid < BLK_HDR_SIZE){
-        sm_blkHdr[tid] = blockHeader[tid];
-    }
-
-    __syncthreads();
-    
-    for(int i = 0; i < BLK_HDR_SIZE; i++){
-        ptr[i] = sm_blkHdr[i];
-    }
-    
-
-
-    unsigned int exp = blk.nbits >> 24;
-    unsigned int mant = blk.nbits & 0xffffff;
-    unsigned char target_hex[32] = {};
-    
-    unsigned int shift = 8 * (exp - 3);
-    unsigned int sb = shift / 8; 
-    unsigned int rb = shift % 8; 
-    
-    target_hex[sb    ] = (mant << rb);      
-    target_hex[sb + 1] = (mant >> (8-rb));  
-    target_hex[sb + 2] = (mant >> (16-rb)); 
-    target_hex[sb + 3] = (mant >> (24-rb)); 
-
-
-
-    SHA256 sha256_ctx;
-    
-    for(blk.nonce = gtid * nTskPerThrd; \
-                    blk.nonce < (gtid + 1) * nTskPerThrd; ++blk.nonce) 
-    {   
-        if(sm_found[0])break;
-
-        double_sha256_dev(&sha256_ctx, (unsigned char*)&blk, BLK_HDR_SIZE);
- 
-        if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
-        {
-            *nonceValidDev = blk.nonce;
-            sm_found[0] = 1;
-            break;
-        }
-    }
-
-}
 
 
 
