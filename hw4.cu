@@ -31,6 +31,9 @@ typedef struct _block
     unsigned int nonce;
 }HashBlock;
 
+#define BLK_HDR_SIZE 80
+
+// sizeof(block) == 80 (bytes).
 
 
 
@@ -250,6 +253,7 @@ void solve(FILE *fin, FILE *fout)
 
 
     HashBlock block;
+    // printf("sizeof(block): %d\n", (int)sizeof(block));
 
     // convert to byte array in little-endian
     convert_string_to_little_endian_bytes((unsigned char *)&block.version, version, 8);
@@ -289,29 +293,30 @@ void solve(FILE *fin, FILE *fout)
     // }
 
     unsigned long long nTasks = 1 << 32;
-    unsigned int nTasksPerThread = 65536;
-    unsigned int nThreads = nTasks / nTasksPerThread;
-    unsigned int nThreadsPerBlock = 512;
+    unsigned int nTskPerThrd = 65536;
+    unsigned int nThrd = nTasks / nTskPerThrd;
+    unsigned int nThrdPerBlk = 512;
 
-    unsigned char *blockHeader, *nonceValid;
+    unsigned char *blockHeader, *nonceValidDev;
+    unsigned char nonceValidHost[32];
 
     cudaMalloc(&blockHeader, sizeof(block));
-    cudaMemcpy(blockHeader, block, sizeof(block), cudaMemcpyHostToDevice);
+    cudaMemcpy(blockHeader, (unsigned char*)&block,
+                         sizeof(block), cudaMemcpyHostToDevice);
 
-    cudaMalloc(&nonceValid, 4 * sizeof(unsigned char));
-    solve<<< nThreads / nThreadsPerBlock, nThreadsPerBlock>>>(blockHeader, nonceValid); 
+    cudaMalloc(&nonceValidDev, 4 * sizeof(unsigned char));
+    solve<<< nThrd / nThrdPerBlk, nThrdPerBlk>>>(blockHeader, nonceValidDev); 
 
+    cudaDeviceSynchronize();
 
+    cudaMemcpy(nonceValidHost, nonceValidDev, 
+                    4 * sizeof(unsigned char), cudaMemcpyDeviceToHost);
 
+    
 
-
-
-
-
-
-    for(int i=0;i<4;++i)
+    for(int i=0; i < 4; ++i)
     {
-        fprintf(fout, "%02x", ((unsigned char*)&block.nonce)[i]);
+        fprintf(fout, "%02x", ((unsigned char*)&nonceValidHost)[i]);
     }
     fprintf(fout, "\n");
 
@@ -324,30 +329,44 @@ void solve(FILE *fin, FILE *fout)
 
 
 
-__global__ void sobel(unsigned char *s, unsigned char *t, 
-                                unsigned height, unsigned width, unsigned channels)
+__global__ void solve(unsigned char *blockHeader, unsigned char *nonceValidDev)
 {
-    const unsigned short tidx_z = threadIdx.x;
-    const unsigned short tidx_x = threadIdx.y;
-    const unsigned short tidx_y = threadIdx.z;
-    const int bidx_z = blockIdx.x;
-    const int bidx_x = blockIdx.y;
-    const int bidx_y = blockIdx.z;
-    const int bdim_z = blockDim.x;
-    const int bdim_x = blockDim.y;
-    const int bdim_y = blockDim.z;
-    const int basez = bidx_z * bdim_z;
-    const int basex = bidx_x * bdim_x;
-    const int basey = bidx_y * bdim_y;
-    const int z = basez + tidx_z;
-    const int x = basex + tidx_x;
-    const int y = basey + tidx_y; 
 
-    __shared__ unsigned char smSrc[3 * (BLOCK_N_X + 4) * (BLOCK_N_Y + 4)];
-    int idx_raw;
-    const unsigned long long n_pixels = width * height;
+    // BLK_HDR_SIZE
+
+    int gtid = blockIDx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
+
+    __shared__ unsigned char sm_blkHdr[BLK_HDR_SIZE];
+
+    HashBlock blk;
+    unsigned char* ptr;
+    ptr = ((unsigned char*)&blk);
+
+    if(tid < BLK_HDR_SIZE){
+        sm_blkHdr[tid] = blockHeader[tid];
+    }
+
+    __syncthreads();
     
-    if(x > width + 4 - 1 || y > height + 4 - 1) return;
+    for(int i = 0; i < BLK_HDR_SIZE; i++){
+        ptr[i] = sm_blkHdr[i];
+    }
+    
+
+    SHA256 sha256_ctx;
+    
+    for(block.nonce = gtid * nTskPerThrd; \
+                    block.nonce < (gtid + 1) * nTskPerThrd; ++block.nonce) 
+    {   
+        double_sha256(&sha256_ctx, (unsigned char*)&block, sizeof(block));
+ 
+        if(little_endian_bit_comparison(sha256_ctx.b, target_hex, 32) < 0)  
+        {
+            break;
+        }
+    }
+
 }
 
 
