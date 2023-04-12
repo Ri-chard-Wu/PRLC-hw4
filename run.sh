@@ -18,7 +18,7 @@ if [ -f "$RunFile" ]; then
     echo "=            Run hw4             ="
     echo "==================================="
 
-    ./$RunFile $inFile $outFile > run-stderr.out
+    ./$RunFile $inFile $outFile 2> run-stderr.out
 
     echo "==================================="
     echo "=      Print run-stderr.out       ="
