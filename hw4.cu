@@ -119,8 +119,9 @@ void print_hex_inverse(unsigned char* hex, size_t len)
 
 
 
-int little_endian_bit_comparison(const unsigned char *a, const unsigned char *b, size_t byte_len)
-{
+__device__ 
+int little_endian_bit_comparison_dev(const unsigned char *a, 
+                                        const unsigned char *b, size_t byte_len){
     // compared from lowest bit
     for(int i = byte_len - 1; i >= 0; --i)
     {
@@ -159,7 +160,13 @@ void double_sha256(SHA256 *sha256_ctx, unsigned char *bytes, size_t len)
 }
 
 
+__device__ 
+void double_sha256_dev(SHA256 *sha256_ctx, unsigned char *bytes, size_t len){
+    SHA256 tmp;
 
+    sha256_dev(&tmp, (BYTE*)bytes, len);   
+    sha256_dev(sha256_ctx, (BYTE*)&tmp, sizeof(tmp));
+}
 
 ////////////////////   Merkle Root   /////////////////////
 
@@ -265,19 +272,19 @@ void solve(FILE *fin, FILE *fout)
     
     
     // ********** calculate target value *********
-    unsigned int exp = block.nbits >> 24;
-    unsigned int mant = block.nbits & 0xffffff;
-    unsigned char target_hex[32] = {};
+    // unsigned int exp = block.nbits >> 24;
+    // unsigned int mant = block.nbits & 0xffffff;
+    // unsigned char target_hex[32] = {};
     
-    unsigned int shift = 8 * (exp - 3);
-    unsigned int sb = shift / 8; 
-    unsigned int rb = shift % 8; 
+    // unsigned int shift = 8 * (exp - 3);
+    // unsigned int sb = shift / 8; 
+    // unsigned int rb = shift % 8; 
     
 
-    target_hex[sb    ] = (mant << rb);      
-    target_hex[sb + 1] = (mant >> (8-rb));  
-    target_hex[sb + 2] = (mant >> (16-rb)); 
-    target_hex[sb + 3] = (mant >> (24-rb)); 
+    // target_hex[sb    ] = (mant << rb);      
+    // target_hex[sb + 1] = (mant >> (8-rb));  
+    // target_hex[sb + 2] = (mant >> (16-rb)); 
+    // target_hex[sb + 3] = (mant >> (24-rb)); 
 
     
     // SHA256 sha256_ctx;
@@ -297,26 +304,29 @@ void solve(FILE *fin, FILE *fout)
     unsigned int nThrd = nTasks / nTskPerThrd;
     unsigned int nThrdPerBlk = 512;
 
-    unsigned char *blockHeader, *nonceValidDev;
-    unsigned char nonceValidHost[32];
+    unsigned char *blockHeader;
+    unsigned int *nonceValidDev;
+    unsigned int nonceValidHost = 0;
 
-    cudaMalloc(&blockHeader, sizeof(block));
+    cudaMalloc(&blockHeader, BLK_HDR_SIZE);
     cudaMemcpy(blockHeader, (unsigned char*)&block,
-                         sizeof(block), cudaMemcpyHostToDevice);
+                         BLK_HDR_SIZE, cudaMemcpyHostToDevice);
 
-    cudaMalloc(&nonceValidDev, 4 * sizeof(unsigned char));
-    solve<<< nThrd / nThrdPerBlk, nThrdPerBlk>>>(blockHeader, nonceValidDev); 
+    cudaMalloc(&nonceValidDev, sizeof(int));
+    cudaMemset(nonceValidDev, 0, sizeof(int));
+    
+    nonceSearch<<< nThrd / nThrdPerBlk, nThrdPerBlk>>>(blockHeader, nonceValidDev); 
 
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
 
-    cudaMemcpy(nonceValidHost, nonceValidDev, 
-                    4 * sizeof(unsigned char), cudaMemcpyDeviceToHost);
+    while(!nonceValidHost){
+        cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
+    }
 
     
-
     for(int i=0; i < 4; ++i)
     {
-        fprintf(fout, "%02x", ((unsigned char*)&nonceValidHost)[i]);
+        fprintf(fout, "%02x", ((unsigned char *)&nonceValidHost)[i]);
     }
     fprintf(fout, "\n");
 
@@ -329,7 +339,7 @@ void solve(FILE *fin, FILE *fout)
 
 
 
-__global__ void solve(unsigned char *blockHeader, unsigned char *nonceValidDev)
+__global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValidDev)
 {
 
     // BLK_HDR_SIZE
@@ -338,6 +348,9 @@ __global__ void solve(unsigned char *blockHeader, unsigned char *nonceValidDev)
     int tid = threadIdx.x;
 
     __shared__ unsigned char sm_blkHdr[BLK_HDR_SIZE];
+    __shared__ unsigned char sm_found[4];
+    sm_found[0] = 0;
+
 
     HashBlock blk;
     unsigned char* ptr;
@@ -354,15 +367,35 @@ __global__ void solve(unsigned char *blockHeader, unsigned char *nonceValidDev)
     }
     
 
+
+    unsigned int exp = blk.nbits >> 24;
+    unsigned int mant = blk.nbits & 0xffffff;
+    unsigned char target_hex[32] = {};
+    
+    unsigned int shift = 8 * (exp - 3);
+    unsigned int sb = shift / 8; 
+    unsigned int rb = shift % 8; 
+    
+    target_hex[sb    ] = (mant << rb);      
+    target_hex[sb + 1] = (mant >> (8-rb));  
+    target_hex[sb + 2] = (mant >> (16-rb)); 
+    target_hex[sb + 3] = (mant >> (24-rb)); 
+
+
+
     SHA256 sha256_ctx;
     
-    for(block.nonce = gtid * nTskPerThrd; \
-                    block.nonce < (gtid + 1) * nTskPerThrd; ++block.nonce) 
+    for(blk.nonce = gtid * nTskPerThrd; \
+                    blk.nonce < (gtid + 1) * nTskPerThrd; ++blk.nonce) 
     {   
-        double_sha256(&sha256_ctx, (unsigned char*)&block, sizeof(block));
+        if(sm_found[0])break;
+
+        double_sha256_dev(&sha256_ctx, (unsigned char*)&blk, BLK_HDR_SIZE);
  
-        if(little_endian_bit_comparison(sha256_ctx.b, target_hex, 32) < 0)  
+        if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
         {
+            *nonceValidDev = blk.nonce;
+            sm_found[0] = 1;
             break;
         }
     }

@@ -104,7 +104,6 @@ void sha256_transform(SHA256 *ctx, const BYTE *msg)
 }
 
 
-
 void sha256(SHA256 *ctx, const BYTE *msg, size_t len) // `len` could be 64, 32.
 {
 	// Initialize hash values:
@@ -183,6 +182,127 @@ void sha256(SHA256 *ctx, const BYTE *msg, size_t len) // `len` could be 64, 32.
 
 
 
+
+
+__device__
+void sha256_transform_dev(SHA256 *ctx, const BYTE *msg){
+	WORD a, b, c, d, e, f, g, h;
+	WORD i, j;
+	
+
+	WORD w[64];
+
+	for(i=0, j=0; i < 16; ++i, j += 4)
+	{
+		w[i] = (msg[j]<<24) | (msg[j+1]<<16) | (msg[j+2]<<8) | (msg[j+3]);
+	}
+	
+
+	for( i = 16; i < 64; ++i)
+	{
+		WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
+		WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
+		w[i] = w[i-16] + s0 + w[i-7] + s1;
+	}
+	
+
+	a = ctx->h[0];
+	b = ctx->h[1];
+	c = ctx->h[2];
+	d = ctx->h[3];
+	e = ctx->h[4];
+	f = ctx->h[5];
+	g = ctx->h[6];
+	h = ctx->h[7];
+	
+
+	for(i=0;i<64;++i)
+	{
+		WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
+		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
+		WORD ch = (e & f) ^ ((~e) & g);
+		WORD maj = (a & b) ^ (a & c) ^ (b & c);
+		WORD temp1 = h + S1 + ch + k[i] + w[i];
+		WORD temp2 = S0 + maj;
+		
+		h = g;
+		g = f;
+		f = e;
+		e = d + temp1;
+		d = c;
+		c = b;
+		b = a;
+		a = temp1 + temp2;
+	}
+	
+	ctx->h[0] += a;
+	ctx->h[1] += b;
+	ctx->h[2] += c;
+	ctx->h[3] += d;
+	ctx->h[4] += e;
+	ctx->h[5] += f;
+	ctx->h[6] += g;
+	ctx->h[7] += h;
+}
+
+
+
+
+
+__device__ 
+void sha256_dev(SHA256 *ctx, const BYTE *msg, size_t len){
+	
+	ctx->h[0] = 0x6a09e667;
+	ctx->h[1] = 0xbb67ae85;
+	ctx->h[2] = 0x3c6ef372;
+	ctx->h[3] = 0xa54ff53a;
+	ctx->h[4] = 0x510e527f;
+	ctx->h[5] = 0x9b05688c;
+	ctx->h[6] = 0x1f83d9ab;
+	ctx->h[7] = 0x5be0cd19;
+	
+	WORD i, j;
+	size_t remain = len % 64;
+	size_t total_len = len - remain;
+
+	for(i=0; i < total_len; i += 64) 
+	{
+		
+		sha256_transform_dev(ctx, &msg[i]);
+	}
+	
+	BYTE m[64] = {};
+	for(i=total_len, j=0; i < len; ++i, ++j) 
+	{
+		m[j] = msg[i];
+	}
+
+	m[j++] = 0x80;  
+	
+	if(j > 56) // never true?
+	{
+		sha256_transform_dev(ctx, m);
+		memset(m, 0, sizeof(m));
+		printf("true\n");
+	}
+	
+	unsigned long long L = len * 8;  
+	m[63] = L;
+	m[62] = L >> 8;
+	m[61] = L >> 16;
+	m[60] = L >> 24;
+	m[59] = L >> 32;
+	m[58] = L >> 40;
+	m[57] = L >> 48;
+	m[56] = L >> 56;
+	sha256_transform_dev(ctx, m);
+	
+	for(i=0;i<32;i+=4)
+	{
+        _swap(ctx->b[i], ctx->b[i+3]);
+        _swap(ctx->b[i+1], ctx->b[i+2]);
+	}
+}
 
 
 
