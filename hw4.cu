@@ -208,32 +208,7 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 
 __device__ 
 int little_endian_bit_comparison_dev(const unsigned char *a, 
-                                        const unsigned char *b, size_t byte_len){
-    
-    // long long int *ptr_a = ((long long int *)a);
-    // long long int *ptr_b = ((long long int *)b);
-    // int lz_a, lz_b;
-    
-
-    // for(int i=3; i >= 0 ; i--){
-        
-    //     lz_a = __clzll(ptr_a[i]);
-    //     lz_b = __clzll(ptr_b[i]);
-
-    //     if(lz_a  > lz_b) // most likely.
-    //         return -1;
-    //     else if(lz_a  < lz_b)
-    //         return 1;
-    //     else{
-
-    //         if(ptr_a[i]  < ptr_b[i])
-    //             return -1;
-    //         else if(ptr_a[i]  > ptr_b[i])
-    //             return 1;
-
-    //     }
-
-    // }                    
+                                        const unsigned char *b, size_t byte_len){           
 
     // compared from lowest bit
     for(int i = byte_len - 1; i >= 0; --i)
@@ -664,10 +639,15 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
         // sha256_stage1_dev((SHA256 *)tmp, sm, nonce);
         sha256_stage1_dev(sm, nonce);
 
-        sha256_stage2_dev(&sha256_ctx, sm); // 32 bytes
+        // sha256_stage2_dev(&sha256_ctx, sm); // 32 bytes
+        sha256_stage2_dev(sm); // 32 bytes
         
         
-        if(little_endian_bit_comparison_dev(sha256_ctx.b, &sm[112], 32) < 0)  
+        unsigned int msgBase = BASE_ADDR_THRD_LOCAL_SM + \  
+                                    threadIdx.x * SIZE_THRD_LOCAL_SM;
+                                    
+        // if(little_endian_bit_comparison_dev(sha256_ctx.b, &sm[112], 32) < 0)  
+        if(little_endian_bit_comparison_dev(&sm[msgBase], &sm[112], 32) < 0)  
         {
             *nonceValidDev = nonce;
             break;
