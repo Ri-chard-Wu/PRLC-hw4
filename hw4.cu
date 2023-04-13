@@ -480,16 +480,8 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
     int tid = threadIdx.x;
 
     __shared__ unsigned char sm[80 + 32];
-    // __shared__ unsigned char sm[48896]; // 3.2 kB of sm, 191 B per thread.
 
     HashBlock *blk;
-    // unsigned char* ptr;
-    // ptr = ((unsigned char*)&blk);
-
-    // if(tid < BLK_HDR_SIZE){
-    //     sm_blkHdr[tid] = blockHeader[tid];
-    // }
-
 
     if(tid < 20){
         ((WORD *)sm)[tid] = ((WORD *)blockHeader)[tid];
@@ -497,72 +489,53 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
 
     __syncthreads();
     
-// (SHA256 *ctx, const BYTE *msg)
     if(tid == 0){
         sha256_commonBlkhdr_dev((SHA256 *)(&sm[80]), (BYTE *)sm);
-
-        // printf("blockIdx.x: %d\n", blockIdx.x);
-
-        if(blockIdx.x == 2){
-            for(int i=0;i<8;i++){
-                printf("%d, ", ((WORD *)&sm[80])[i]);
-            }
-            printf("\n");
-        }
-
     }
 
     __syncthreads();
 
 
-    // // for(int i = 0; i < BLK_HDR_SIZE; i++){ // broadcast-type access to sm.
-    // //     ptr[i] = sm[i];
-    // // }
+    blk = (HashBlock *)sm;
+
+    unsigned int exp = blk->nbits >> 24;
+    unsigned int mant = blk->nbits & 0xffffff;
+    unsigned char target_hex[32] = {};
     
-
-    // blk = (HashBlock *)sm;
-
-    // unsigned int exp = blk->nbits >> 24;
-    // unsigned int mant = blk->nbits & 0xffffff;
-    // unsigned char target_hex[32] = {};
+    unsigned int shift = 8 * (exp - 3);
+    unsigned int sb = shift >> 3; 
+    unsigned int rb = shift % 8; 
     
-    // unsigned int shift = 8 * (exp - 3);
-    // unsigned int sb = shift >> 3; 
-    // unsigned int rb = shift % 8; 
+    target_hex[sb    ] = (mant << rb);      
+    target_hex[sb + 1] = (mant >> (8-rb));  
+    target_hex[sb + 2] = (mant >> (16-rb)); 
+    target_hex[sb + 3] = (mant >> (24-rb)); 
+
+
+    SHA256 sha256_ctx;
+    unsigned int nonce;
+    BYTE tmp[32];
     
-    // target_hex[sb    ] = (mant << rb);      
-    // target_hex[sb + 1] = (mant >> (8-rb));  
-    // target_hex[sb + 2] = (mant >> (16-rb)); 
-    // target_hex[sb + 3] = (mant >> (24-rb)); 
+    for(nonce = gtid * N_TSK_PER_THRD; nonce < (gtid + 1) * N_TSK_PER_THRD; ++nonce) 
+    {       
 
-    // // ------------------ only run above code: 67us -------------------------
-
-
-    // SHA256 sha256_ctx;
-    // unsigned int nonce;
-    // BYTE tmp[32];
-    
-    // for(nonce = gtid * N_TSK_PER_THRD; nonce < (gtid + 1) * N_TSK_PER_THRD; ++nonce) 
-    // {       
-
-    //     // SHA256 tmp;
-    //     // sha256_dev(&tmp, (BYTE*)&blk, BLK_HDR_SIZE); // 80 bytes
-
-    //     for(int i=0; i < 8; i++){
-    //         ((WORD *)tmp)[i] = ((WORD *)sm)[80 + i];
-    //     }
+        for(int i=0; i < 8; i++){
+            ((WORD *)tmp)[i] = ((WORD *)&sm[80])[i];
+        }
         
-    //     sha256_wholeBlkhdr_dev((SHA256 *)tmp, sm, nonce);
+        sha256_wholeBlkhdr_dev((SHA256 *)tmp, sm, nonce);
 
-    //     sha256_dev(&sha256_ctx, tmp, 32); // 32 bytes
+        sha256_dev(&sha256_ctx, tmp, 32); // 32 bytes
         
         
-    //     if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
-    //     {
-    //         *nonceValidDev = nonce;
-    //         break;
-    //     }
-    // }
+
+
+        if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
+        {
+            *nonceValidDev = nonce;
+            break;
+        }
+    }
 }
 
 
