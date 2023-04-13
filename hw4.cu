@@ -364,45 +364,49 @@ void sha256_stage1_dev(SHA256 *tmp, unsigned char *sm, unsigned int nonce){
 	h = tmp->h[7];
 
 
-    msg = (BYTE *)&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x * SIZE_THRD_LOCAL_SM];
+    msg = (BYTE *)&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x];
    
-    for(int i=0; i < 16; i++){
-        ((WORD *)msg)[i] = 0;
+    for(int i=0; i < 8192; i+=128){
+        msg[i] = 0;
     }
 
-    w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x \
-                                            * SIZE_THRD_LOCAL_SM + 64];
+    w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + 8192 + 4 * threadIdx.x];
 
-    ((WORD *)(&msg[12]))[0] = nonce;
+    // ((WORD *)(&msg[12]))[0] = nonce;
+
+    msg[1536] = ((BYTE *)&nonce)[0];
+    msg[1664] = ((BYTE *)&nonce)[1];
+    msg[1792] = ((BYTE *)&nonce)[2];
+    msg[1920] = ((BYTE *)&nonce)[3];
 
 	for(i=64, j=0; i < 76; ++i, ++j) 
 	{
-		msg[j] = sm[i];
+		msg[j*128] = sm[i];
 	}
 
-	msg[16] = 0x80;  
-	msg[63] = 640;
-	msg[62] = 2;
-	msg[61] = 0;
-	msg[60] = 0;
-	msg[59] = 0;
-	msg[58] = 0;
-	msg[57] = 0;
-	msg[56] = 0;
+	msg[16 * 128] = 0x80;  
+	msg[63 * 128] = 640;
+	msg[62 * 128] = 2;
+	msg[61 * 128] = 0;
+	msg[60 * 128] = 0;
+	msg[59 * 128] = 0;
+	msg[58 * 128] = 0;
+	msg[57 * 128] = 0;
+	msg[56 * 128] = 0;
 
     // #############################################
 
-	for(i=0, j=0; i < 16; ++i, j += 4)
+	for(i=0, j=0; i < 2048; i+=128, j += 512)
 	{
-		w[i] = (msg[j]<<24) | (msg[j+1]<<16) | (msg[j+2]<<8) | (msg[j+3]);
+		w[i] = (msg[j]<<24) | (msg[j+128]<<16) | (msg[j+256]<<8) | (msg[j+384]);
 	}
 	
 
-	for( i = 16; i < 64; ++i)
+	for( i = 2048; i < 8192; i+=128)
 	{
-		WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
-		WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
-		w[i] = w[i-16] + s0 + w[i-7] + s1;
+		WORD s0 = (_rotr(w[i-1920], 7)) ^ (_rotr(w[i-1920], 18)) ^ (w[i-1920] >> 3);
+		WORD s1 = (_rotr(w[i-256], 17)) ^ (_rotr(w[i-256], 19))  ^ (w[i-256] >> 10);
+		w[i] = w[i-2048] + s0 + w[i-896] + s1;
 	}
 	
 
@@ -412,7 +416,7 @@ void sha256_stage1_dev(SHA256 *tmp, unsigned char *sm, unsigned int nonce){
 		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
 		WORD ch = (e & f) ^ ((~e) & g);
 		WORD maj = (a & b) ^ (a & c) ^ (b & c);
-		WORD temp1 = h + S1 + ch + k_dev[i] + w[i];
+		WORD temp1 = h + S1 + ch + k_dev[i] + w[i*128];
 		WORD temp2 = S0 + maj;
 		
 		h = g;
