@@ -18,6 +18,7 @@ if [ -f "$RunFile" ]; then
     echo "=            Run hw4             ="
     echo "==================================="
 
+    export CUDA_VISIBLE_DEVICES=0
     ./$RunFile $inFile $outFile 2> run-stderr.out
 
     echo "==================================="

@@ -9,13 +9,6 @@
 
 #include "sha256.h"
 
-#include <chrono>
-#include <iostream>
-using namespace std::chrono;
-using namespace std;
-
-
-
 // circular shift - wiki:
 //     https://en.wikipedia.org/wiki/Circular_shift
 
@@ -97,20 +90,10 @@ void sha256_transform(SHA256 *ctx, const BYTE *msg)
 }
 
 
-
-
 void sha256(SHA256 *ctx, const BYTE *msg, size_t len) // `len` could be 64, 32.
 {
-
-	
-
 	// Initialize hash values:
 	// (first 32 bits of the fractional parts of the square roots of the first 8 primes 2..19):
-
-	cerr <<"\n===========================================\n";
-
-	auto startAll = high_resolution_clock::now();
-
 	ctx->h[0] = 0x6a09e667;
 	ctx->h[1] = 0xbb67ae85;
 	ctx->h[2] = 0x3c6ef372;
@@ -119,74 +102,46 @@ void sha256(SHA256 *ctx, const BYTE *msg, size_t len) // `len` could be 64, 32.
 	ctx->h[5] = 0x9b05688c;
 	ctx->h[6] = 0x1f83d9ab;
 	ctx->h[7] = 0x5be0cd19;
-
-
-
-
-	// auto start = high_resolution_clock::now();
-
+	
+	
 	WORD i, j;
 	size_t remain = len % 64;
 	size_t total_len = len - remain;
-
-	// auto stop = high_resolution_clock::now();
-	// auto duration = duration_cast<microseconds>(stop - start);
-	// cerr <<"take remainder time: "<<duration.count()<<" us"<<endl;
-
 	
 
-	// start = high_resolution_clock::now();
-
+	// Process the message in successive 512-bit chunks
+	// For each chunk:
 	for(i=0; i < total_len; i += 64) // `total_len` could be 64, 32.
 	{
+		// `ctx`: output
+		// `msg`: input
 		sha256_transform(ctx, &msg[i]);
 	}
 	
-	// stop = high_resolution_clock::now();
-	// duration = duration_cast<microseconds>(stop - start);
-	// cerr <<"sha256_transform() 1 time"<<duration.count()<<" us"<<endl;
-
-
-
-
-	// start = high_resolution_clock::now();
 
 	// Process remain data
 	BYTE m[64] = {};
-	for(i=total_len, j=0; i < len; ++i, ++j) 
+	for(i=total_len, j=0; i < len; ++i, ++j) // yes, only for `len` == 32.\
+													In this case, `total_len` == 0.
 	{
 		m[j] = msg[i];
 	}
+	
 
-	// stop = high_resolution_clock::now();
-	// duration = duration_cast<microseconds>(stop - start);
-	// cerr <<"Process remain data: "<<duration.count()<<" us"<<endl;
-
-
-
-
-
-	// start = high_resolution_clock::now();
-
-
-	m[j++] = 0x80;  
+	// Append a single '1' bit
+	m[j++] = 0x80;  //1000 0000
+	
+	// Append K '0' bits, where k is the minimum number >= 0 such\
+					 that L + 1 + K + 64 is a multiple of 512
 	if(j > 56)
 	{
 		sha256_transform(ctx, m);
 		memset(m, 0, sizeof(m));
 		printf("true\n");
 	}
-
-
-	// stop = high_resolution_clock::now();
-	// duration = duration_cast<microseconds>(stop - start);
-	// cerr <<"j > 56 time: "<<duration.count()<<" us"<<endl;
-
-
 	
-
-	// start = high_resolution_clock::now();
-
+	// Append L as a 64-bit big-endian integer, making the total \
+							post-processed length a multiple of 512 bits
 	unsigned long long L = len * 8;  //bits
 	m[63] = L;
 	m[62] = L >> 8;
@@ -196,43 +151,15 @@ void sha256(SHA256 *ctx, const BYTE *msg, size_t len) // `len` could be 64, 32.
 	m[58] = L >> 40;
 	m[57] = L >> 48;
 	m[56] = L >> 56;
-
-	// stop = high_resolution_clock::now();
-	// duration = duration_cast<microseconds>(stop - start);
-	// cerr <<"m[56 - 63]: "<<duration.count()<<" us"<<endl;
-
-
-
-	// start = high_resolution_clock::now();
-
 	sha256_transform(ctx, m);
-
-	// stop = high_resolution_clock::now();
-	// duration = duration_cast<microseconds>(stop - start);
-	// cerr <<"sha256_transform() 2 time: "<<duration.count()<<" us"<<endl;
-
-
 	
-
-
-	
-	// start = high_resolution_clock::now();
-
+	// Produce the final hash value (little-endian to big-endian)
+	// Swap 1st & 4th, 2nd & 3rd byte for each word
 	for(i=0;i<32;i+=4)
 	{
         _swap(ctx->b[i], ctx->b[i+3]);
         _swap(ctx->b[i+1], ctx->b[i+2]);
 	}
-
-	// stop = high_resolution_clock::now();
-	// duration = duration_cast<microseconds>(stop - start);
-	// cerr <<"_swap time: "<<duration.count()<<" us"<<endl;
-
-	auto stopAll = high_resolution_clock::now();
-	auto durationAll = duration_cast<microseconds>(stopAll - startAll);
-	cerr <<"all time: "<<durationAll.count()<<" us"<<endl;
-
-	
 }
 
 

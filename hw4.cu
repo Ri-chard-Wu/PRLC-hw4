@@ -9,17 +9,36 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-
 #include <cstdio>
 #include <cstring>
-
 #include <cassert>
-
-#include "sha256.h"
 #include <chrono>
 
+#include "sha256.h"
 using namespace std::chrono;
 using namespace std;
+
+// #define N_TSK_EXP 32
+// #define N_TSK_PER_THRD_EXP 13
+// #define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 19
+// #define N_THRD_PER_BLK_EXP 8   
+
+// #define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 2048
+// #define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 256
+// #define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 8192
+
+
+
+#define N_TSK_EXP 32
+#define N_TSK_PER_THRD_EXP 13
+#define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 19
+#define N_THRD_PER_BLK_EXP 5
+
+#define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 16384
+#define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 32
+#define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 8192
+
+
 
 
 ////////////////////////   Block   /////////////////////
@@ -34,6 +53,9 @@ typedef struct _block
     unsigned int nonce;
 }HashBlock;
 
+#define BLK_HDR_SIZE 80
+
+// sizeof(block) == 80 (bytes).
 
 
 
@@ -61,17 +83,6 @@ unsigned char decode(unsigned char c)
             return c-'0';
     }
 }
-
-
-
-
-// convert hex string to binary
-//
-// in: input string
-// string_len: the length of the input string
-//      '\0' is not included in string_len!!!
-// out: output bytes array
-
 
 
 
@@ -105,9 +116,6 @@ void print_hex(unsigned char* hex, size_t len)
     }
 }
 
-
-
-
 // print out binar array (from lowest value) in the hex format
 void print_hex_inverse(unsigned char* hex, size_t len)
 {
@@ -116,22 +124,6 @@ void print_hex_inverse(unsigned char* hex, size_t len)
         printf("%02x", hex[i]);
     }
 }
-
-
-
-int little_endian_bit_comparison(const unsigned char *a, const unsigned char *b, size_t byte_len)
-{
-    // compared from lowest bit
-    for(int i = byte_len - 1; i >= 0; --i)
-    {
-        if(a[i] < b[i])
-            return -1;
-        else if(a[i] > b[i])
-            return 1;
-    }
-    return 0;
-}
-
 
 
 void getline(char *str, size_t len, FILE *fp)
@@ -143,10 +135,6 @@ void getline(char *str, size_t len, FILE *fp)
 }
 
 
-
-////////////////////////   Hash   ///////////////////////
-
-// `len` == 64 (bytes) == two 256-bits number.
 void double_sha256(SHA256 *sha256_ctx, unsigned char *bytes, size_t len)
 {
     SHA256 tmp;
@@ -158,18 +146,6 @@ void double_sha256(SHA256 *sha256_ctx, unsigned char *bytes, size_t len)
     sha256(sha256_ctx, (BYTE*)&tmp, sizeof(tmp));
 }
 
-
-
-
-////////////////////   Merkle Root   /////////////////////
-
-
-
-
-// calculate merkle root from several merkle branches
-// root: output hash will store here (little-endian)
-// branch: merkle branch  (big-endian)
-// count: total number of transactions or merkle branch
 void calc_merkle_root(unsigned char *root, int count, char **branch)
 {
     size_t total_count = count; // merkle branch
@@ -203,9 +179,7 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 
         for(i=0, j=0; i < total_count; i += 2, ++j)
         {
-            // this part is slightly tricky,
-            //   because of the implementation of the double_sha256,
-            //   we can avoid the memory begin overwritten during our sha256d calculation
+
             // double_sha:
             //     tmp = hash(list[0]+list[1])
             //     list[0] = hash(tmp)
@@ -224,6 +198,362 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 
 
 
+
+
+// ###############################################################################
+
+
+__device__ 
+int little_endian_bit_comparison_dev(const unsigned char *a, 
+                                        const unsigned char *b, size_t byte_len){
+    
+    // long long int *ptr_a = ((long long int *)a);
+    // long long int *ptr_b = ((long long int *)b);
+    // int lz_a, lz_b;
+    
+
+    // for(int i=3; i >= 0 ; i--){
+        
+    //     lz_a = __clzll(ptr_a[i]);
+    //     lz_b = __clzll(ptr_b[i]);
+
+    //     if(lz_a  > lz_b) // most likely.
+    //         return -1;
+    //     else if(lz_a  < lz_b)
+    //         return 1;
+    //     else{
+
+    //         if(ptr_a[i]  < ptr_b[i])
+    //             return -1;
+    //         else if(ptr_a[i]  > ptr_b[i])
+    //             return 1;
+
+    //     }
+
+    // }                    
+
+    // compared from lowest bit
+    for(int i = byte_len - 1; i >= 0; --i)
+    {
+        if(a[i] < b[i])
+            return -1;
+        else if(a[i] > b[i])
+            return 1;
+    }
+
+    return 0;
+}
+
+
+__device__
+void sha256_transform_dev(SHA256 *ctx, const BYTE *msg){
+	
+    WORD a, b, c, d, e, f, g, h;
+	WORD i, j;
+	
+
+	WORD w[64];
+
+	for(i=0, j=0; i < 16; ++i, j += 4)
+	{
+		w[i] = (msg[j]<<24) | (msg[j+1]<<16) | (msg[j+2]<<8) | (msg[j+3]);
+	}
+	
+
+	for( i = 16; i < 64; ++i)
+	{
+		WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
+		WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
+		w[i] = w[i-16] + s0 + w[i-7] + s1;
+	}
+	
+
+	a = ctx->h[0];
+	b = ctx->h[1];
+	c = ctx->h[2];
+	d = ctx->h[3];
+	e = ctx->h[4];
+	f = ctx->h[5];
+	g = ctx->h[6];
+	h = ctx->h[7];
+	
+
+	for(i=0;i<64;++i)
+	{
+		WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
+		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
+		WORD ch = (e & f) ^ ((~e) & g);
+		WORD maj = (a & b) ^ (a & c) ^ (b & c);
+		WORD temp1 = h + S1 + ch + k_dev[i] + w[i];
+		WORD temp2 = S0 + maj;
+		
+		h = g;
+		g = f;
+		f = e;
+		e = d + temp1;
+		d = c;
+		c = b;
+		b = a;
+		a = temp1 + temp2;
+	}
+	
+	ctx->h[0] += a;
+	ctx->h[1] += b;
+	ctx->h[2] += c;
+	ctx->h[3] += d;
+	ctx->h[4] += e;
+	ctx->h[5] += f;
+	ctx->h[6] += g;
+	ctx->h[7] += h;
+}
+
+
+
+__device__ 
+void sha256_dev(SHA256 *ctx, const BYTE *msg, size_t len){
+
+	ctx->h[0] = 0x6a09e667;
+	ctx->h[1] = 0xbb67ae85;
+	ctx->h[2] = 0x3c6ef372;
+	ctx->h[3] = 0xa54ff53a;
+	ctx->h[4] = 0x510e527f;
+	ctx->h[5] = 0x9b05688c;
+	ctx->h[6] = 0x1f83d9ab;
+	ctx->h[7] = 0x5be0cd19;
+	
+	WORD i, j;
+	size_t remain = len % 64; // 16
+	size_t total_len = len - remain; // 64
+
+	for(i=0; i < total_len; i += 64) // nonce is not inside the first 64 bytes \
+                                        -> no need to compute everytime!
+	{
+		sha256_transform_dev(ctx, &msg[i]);
+	}
+	
+
+
+
+
+	BYTE m[64] = {};
+	for(i=total_len, j=0; i < len; ++i, ++j) 
+	{
+		m[j] = msg[i];
+	}
+
+	m[j++] = 0x80;  
+
+	unsigned long long L = len * 8;  
+	m[63] = L;
+	m[62] = L >> 8;
+	m[61] = L >> 16;
+	m[60] = L >> 24;
+	m[59] = L >> 32;
+	m[58] = L >> 40;
+	m[57] = L >> 48;
+	m[56] = L >> 56;
+
+	sha256_transform_dev(ctx, m);
+	
+
+
+
+	for(i = 0; i < 32 ; i += 4)
+	{
+        _swap(ctx->b[i], ctx->b[i+3]);
+        _swap(ctx->b[i+1], ctx->b[i+2]);
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+__device__ 
+void sha256_commonBlkhdr_dev(SHA256 *ctx, const BYTE *msg){
+
+	ctx->h[0] = 0x6a09e667;
+	ctx->h[1] = 0xbb67ae85;
+	ctx->h[2] = 0x3c6ef372;
+	ctx->h[3] = 0xa54ff53a;
+	ctx->h[4] = 0x510e527f;
+	ctx->h[5] = 0x9b05688c;
+	ctx->h[6] = 0x1f83d9ab;
+	ctx->h[7] = 0x5be0cd19;
+	
+	WORD i, j;
+
+    size_t len = 80;
+	size_t remain = 16; 
+	size_t total_len = 64; 
+
+	sha256_transform_dev(ctx, &msg[0]);
+}
+
+
+
+
+// sm[0 - 79]: raw blk header.
+// sm[80 - 111]: sha of common part of header.
+// sm[]
+
+
+__device__ 
+void sha256_wholeBlkhdr_dev(SHA256 *ctx, unsigned char *sm, unsigned int nonce){
+
+	// ctx->h[0] = 0x6a09e667;
+	// ctx->h[1] = 0xbb67ae85;
+	// ctx->h[2] = 0x3c6ef372;
+	// ctx->h[3] = 0xa54ff53a;
+	// ctx->h[4] = 0x510e527f;
+	// ctx->h[5] = 0x9b05688c;
+	// ctx->h[6] = 0x1f83d9ab;
+	// ctx->h[7] = 0x5be0cd19;
+	
+	WORD i, j;
+    size_t len = 80;
+	size_t remain = len % 64; // 16
+	size_t total_len = len - remain; // 64
+
+	// for(i=0; i < total_len; i += 64) // nonce is not inside the first 64 bytes \
+    //                                     -> no need to compute everytime!
+	// {
+	// 	sha256_transform_dev(ctx, &msg[i]);
+	// }
+	
+
+	BYTE m[64] = {};
+	for(i=64, j=0; i < 76; ++i, ++j) 
+	{
+		m[j] = sm[i];
+	}
+
+    (WORD *)(&m[12])[0] = nonce;
+
+	m[16] = 0x80;  
+
+	unsigned long long L = len * 8;  
+	m[63] = L;
+	m[62] = L >> 8;
+	m[61] = L >> 16;
+	m[60] = L >> 24;
+	m[59] = L >> 32;
+	m[58] = L >> 40;
+	m[57] = L >> 48;
+	m[56] = L >> 56;
+
+	sha256_transform_dev(ctx, m);
+	
+
+
+
+	for(i = 0; i < 32 ; i += 4)
+	{
+        _swap(ctx->b[i], ctx->b[i+3]);
+        _swap(ctx->b[i+1], ctx->b[i+2]);
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+__global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValidDev)
+{
+
+    int gtid = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
+
+    __shared__ unsigned char sm[80 + 32];
+    // __shared__ unsigned char sm[48896]; // 3.2 kB of sm, 191 B per thread.
+
+    HashBlock *blk;
+    // unsigned char* ptr;
+    // ptr = ((unsigned char*)&blk);
+
+    // if(tid < BLK_HDR_SIZE){
+    //     sm_blkHdr[tid] = blockHeader[tid];
+    // }
+
+
+    if(tid < 20){
+        ((int *)sm)[tid] = ((int *)blockHeader)[tid];
+    }
+
+    __syncthreads();
+    
+// (SHA256 *ctx, const BYTE *msg)
+    if(tid == 0){
+        sha256_commonBlkhdr_dev((SHA256 *)(&sm[80]), (BYTE *)sm)
+    }
+
+    __syncthreads();
+
+
+    // for(int i = 0; i < BLK_HDR_SIZE; i++){ // broadcast-type access to sm.
+    //     ptr[i] = sm[i];
+    // }
+    
+
+    blk = (HashBlock *)sm;
+
+    unsigned int exp = blk->nbits >> 24;
+    unsigned int mant = blk->nbits & 0xffffff;
+    unsigned char target_hex[32] = {};
+    
+    unsigned int shift = 8 * (exp - 3);
+    unsigned int sb = shift >> 3; 
+    unsigned int rb = shift % 8; 
+    
+    target_hex[sb    ] = (mant << rb);      
+    target_hex[sb + 1] = (mant >> (8-rb));  
+    target_hex[sb + 2] = (mant >> (16-rb)); 
+    target_hex[sb + 3] = (mant >> (24-rb)); 
+
+    // ------------------ only run above code: 67us -------------------------
+
+
+    SHA256 sha256_ctx;
+    unsigned int nonce;
+    
+    for(nonce = gtid * N_TSK_PER_THRD; nonce < (gtid + 1) * N_TSK_PER_THRD; ++nonce) 
+    {       
+
+        SHA256 tmp;
+        // sha256_dev(&tmp, (BYTE*)&blk, BLK_HDR_SIZE); // 80 bytes
+        
+        sha256_wholeBlkhdr_dev(&tmp, sm, nonce);
+
+        sha256_dev(&sha256_ctx, (BYTE*)&tmp, sizeof(tmp)); // 32 bytes
+        
+        
+        if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
+        {
+            *nonceValidDev = blk.nonce;
+            break;
+        }
+    }
+}
+
+
+
+
 void solve(FILE *fin, FILE *fout)
 {
 
@@ -236,12 +566,11 @@ void solve(FILE *fin, FILE *fout)
     char *raw_merkle_branch;
     char **merkle_branch;
 
-    getline(version, 9, fin);   // read 9 char's, starting from ofst 0.
-    getline(prevhash, 65, fin); // read 65 char's, starting from ofst 9.
+    getline(version, 9, fin);   
+    getline(prevhash, 65, fin); 
     getline(ntime, 9, fin);
     getline(nbits, 9, fin);
     fscanf(fin, "%d\n", &tx);
-    printf("start hashing");
 
     raw_merkle_branch = new char [tx * 65];
     merkle_branch = new char *[tx];
@@ -254,29 +583,22 @@ void solve(FILE *fin, FILE *fout)
     }
 
     // **** calculate merkle root ****
-
     unsigned char merkle_root[32];
+    
+
+
+    auto start = high_resolution_clock::now();
+    
     calc_merkle_root(merkle_root, tx, merkle_branch);
 
-    printf("merkle root(little): ");
-    print_hex(merkle_root, 32);
-    printf("\n");
-
-    printf("merkle root(big):    ");
-    print_hex_inverse(merkle_root, 32);
-    printf("\n");
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+    cout<<"calc_merkle_root() time: "<<duration.count()<<" us"<<endl;
 
 
-    // **** solve block ****
-    printf("Block info (big): \n");
-    printf("  version:  %s\n", version);
-    printf("  pervhash: %s\n", prevhash);
-    printf("  merkleroot: "); print_hex_inverse(merkle_root, 32); printf("\n");
-    printf("  nbits:    %s\n", nbits);
-    printf("  ntime:    %s\n", ntime);
-    printf("  nonce:    ???\n\n");
 
     HashBlock block;
+    // printf("sizeof(block): %d\n", (int)sizeof(block));
 
     // convert to byte array in little-endian
     convert_string_to_little_endian_bytes((unsigned char *)&block.version, version, 8);
@@ -285,76 +607,45 @@ void solve(FILE *fin, FILE *fout)
     convert_string_to_little_endian_bytes((unsigned char *)&block.nbits,   nbits,     8);
     convert_string_to_little_endian_bytes((unsigned char *)&block.ntime,   ntime,     8);
     block.nonce = 0;
-    
-    
-    // ********** calculate target value *********
-    // calculate target value from encoded difficulty which is encoded on "nbits"
-    unsigned int exp = block.nbits >> 24;
-    unsigned int mant = block.nbits & 0xffffff;
-    unsigned char target_hex[32] = {};
-    
-    unsigned int shift = 8 * (exp - 3);
-    unsigned int sb = shift / 8; // always == exp - 3?
-    unsigned int rb = shift % 8; // always == 0?
-    
-    // little-endian
-    target_hex[sb    ] = (mant << rb);      // >> 0?
-    target_hex[sb + 1] = (mant >> (8-rb));  // >> 8?
-    target_hex[sb + 2] = (mant >> (16-rb)); // >> 16?
-    target_hex[sb + 3] = (mant >> (24-rb)); // >> 24?
-    
-    
-    printf("Target value (big): ");
-    print_hex_inverse(target_hex, 32);
-    printf("\n");
 
 
-    // ********** find nonce **************
-    
-    SHA256 sha256_ctx;
-    
-    // try all posible nonce values?
-    for(block.nonce = 0x00000000; block.nonce <= 0xffffffff; ++block.nonce) // 2^32 iterations.
-    {   
-        // hash the entire block header info.
-        double_sha256(&sha256_ctx, (unsigned char*)&block, sizeof(block));
-        // if(block.nonce % 1000000 == 0)
-        // {
-        //     printf("hash #%10u (big): ", block.nonce);
-        //     print_hex_inverse(sha256_ctx.b, 32);
-        //     printf("\n");
-        // }
-        
-        // sha256_ctx < target_hex
-        if(little_endian_bit_comparison(sha256_ctx.b, target_hex, 32) < 0)  
-        {
-            printf("Found Solution!!\n");
-            printf("hash #%10u (big): ", block.nonce);
-            print_hex_inverse(sha256_ctx.b, 32);
-            printf("\n\n");
+    unsigned char *blockHeaderDev;
+    unsigned int *nonceValidDev;
+    unsigned int nonceValidHost = 0;
 
-            break;
-        }
-    }
+    cudaMalloc(&blockHeaderDev, BLK_HDR_SIZE);
+    cudaMemcpy(blockHeaderDev, (unsigned char*)&block,
+                         BLK_HDR_SIZE, cudaMemcpyHostToDevice);
+
+    cudaMalloc(&nonceValidDev, sizeof(int));
+    cudaMemset(nonceValidDev, 0, sizeof(int));
     
 
-    // print result
+    start = high_resolution_clock::now();
 
-    //little-endian
-    printf("hash(little): ");
-    print_hex(sha256_ctx.b, 32);
-    printf("\n");
+    // cudaFuncSetCacheConfig(nonceSearch, cudaFuncCachePreferL1);
+    nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev); 
+    
+    cudaDeviceSynchronize();
+    cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
 
-    //big-endian
-    printf("hash(big):    ");
-    print_hex_inverse(sha256_ctx.b, 32);
-    printf("\n\n");
+    // while(!nonceValidHost){
+    //     cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
+    // }
 
-    for(int i=0;i<4;++i)
+    stop = high_resolution_clock::now();
+    duration = duration_cast<microseconds>(stop - start);
+    cout<<"nonceSearch() time: "<<duration.count()<<" us"<<endl;
+
+    
+    for(int i=0; i < 4; ++i)
     {
-        fprintf(fout, "%02x", ((unsigned char*)&block.nonce)[i]);
+        fprintf(fout, "%02x", ((unsigned char *)&nonceValidHost)[i]);
     }
     fprintf(fout, "\n");
+
+    
+
 
     delete[] merkle_branch;
     delete[] raw_merkle_branch;
@@ -363,8 +654,14 @@ void solve(FILE *fin, FILE *fout)
 
 
 
+
+
+
 int main(int argc, char **argv)
 {
+    // cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
+
+    
 
     if (argc != 3) {
         fprintf(stderr, "usage: cuda_miner <in> <out>\n");
@@ -378,11 +675,10 @@ int main(int argc, char **argv)
     fscanf(fin, "%d\n", &totalblock);
     fprintf(fout, "%d\n", totalblock);
 
-    for(int i=0;i<totalblock;++i)
+    for(int i=0; i < totalblock; ++i)
     {
         solve(fin, fout);
     }
 
     return 0;
 }
-
