@@ -18,25 +18,25 @@
 using namespace std::chrono;
 using namespace std;
 
-// #define N_TSK_EXP 32
-// #define N_TSK_PER_THRD_EXP 13
-// #define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 19
-// #define N_THRD_PER_BLK_EXP 8   
-
-// #define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 2048
-// #define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 256
-// #define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 8192
-
-
-
 #define N_TSK_EXP 32
 #define N_TSK_PER_THRD_EXP 13
 #define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 19
-#define N_THRD_PER_BLK_EXP 5
+#define N_THRD_PER_BLK_EXP 8   
 
-#define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 16384
-#define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 32
+#define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 2048
+#define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 256
 #define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 8192
+
+
+
+// #define N_TSK_EXP 32
+// #define N_TSK_PER_THRD_EXP 13
+// #define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 19
+// #define N_THRD_PER_BLK_EXP 5
+
+// #define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 16384
+// #define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 32
+// #define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 8192
 
 
 
@@ -388,12 +388,6 @@ void sha256_commonBlkhdr_dev(SHA256 *ctx, const BYTE *msg){
 	ctx->h[5] = 0x9b05688c;
 	ctx->h[6] = 0x1f83d9ab;
 	ctx->h[7] = 0x5be0cd19;
-	
-	WORD i, j;
-
-    size_t len = 80;
-	size_t remain = 16; 
-	size_t total_len = 64; 
 
 	sha256_transform_dev(ctx, &msg[0]);
 }
@@ -436,7 +430,12 @@ void sha256_wholeBlkhdr_dev(SHA256 *ctx, unsigned char *sm, unsigned int nonce){
 		m[j] = sm[i];
 	}
 
-    (WORD *)(&m[12])[0] = nonce;
+    // (WORD *)(&m[12])[0] = nonce;
+
+    m[12] = ((BYTE *)&nonce)[0];
+    m[13] = ((BYTE *)&nonce)[1];
+    m[14] = ((BYTE *)&nonce)[2];
+    m[15] = ((BYTE *)&nonce)[3];
 
 	m[16] = 0x80;  
 
@@ -493,62 +492,77 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
 
 
     if(tid < 20){
-        ((int *)sm)[tid] = ((int *)blockHeader)[tid];
+        ((WORD *)sm)[tid] = ((WORD *)blockHeader)[tid];
     }
 
     __syncthreads();
     
 // (SHA256 *ctx, const BYTE *msg)
     if(tid == 0){
-        sha256_commonBlkhdr_dev((SHA256 *)(&sm[80]), (BYTE *)sm)
+        sha256_commonBlkhdr_dev((SHA256 *)(&sm[80]), (BYTE *)sm);
+
+        // printf("blockIdx.x: %d\n", blockIdx.x);
+
+        if(blockIdx.x == 2){
+            for(int i=0;i<8;i++){
+                printf("%d, ", ((WORD *)&sm[80])[i]);
+            }
+            printf("\n");
+        }
+
     }
 
     __syncthreads();
 
 
-    // for(int i = 0; i < BLK_HDR_SIZE; i++){ // broadcast-type access to sm.
-    //     ptr[i] = sm[i];
+    // // for(int i = 0; i < BLK_HDR_SIZE; i++){ // broadcast-type access to sm.
+    // //     ptr[i] = sm[i];
+    // // }
+    
+
+    // blk = (HashBlock *)sm;
+
+    // unsigned int exp = blk->nbits >> 24;
+    // unsigned int mant = blk->nbits & 0xffffff;
+    // unsigned char target_hex[32] = {};
+    
+    // unsigned int shift = 8 * (exp - 3);
+    // unsigned int sb = shift >> 3; 
+    // unsigned int rb = shift % 8; 
+    
+    // target_hex[sb    ] = (mant << rb);      
+    // target_hex[sb + 1] = (mant >> (8-rb));  
+    // target_hex[sb + 2] = (mant >> (16-rb)); 
+    // target_hex[sb + 3] = (mant >> (24-rb)); 
+
+    // // ------------------ only run above code: 67us -------------------------
+
+
+    // SHA256 sha256_ctx;
+    // unsigned int nonce;
+    // BYTE tmp[32];
+    
+    // for(nonce = gtid * N_TSK_PER_THRD; nonce < (gtid + 1) * N_TSK_PER_THRD; ++nonce) 
+    // {       
+
+    //     // SHA256 tmp;
+    //     // sha256_dev(&tmp, (BYTE*)&blk, BLK_HDR_SIZE); // 80 bytes
+
+    //     for(int i=0; i < 8; i++){
+    //         ((WORD *)tmp)[i] = ((WORD *)sm)[80 + i];
+    //     }
+        
+    //     sha256_wholeBlkhdr_dev((SHA256 *)tmp, sm, nonce);
+
+    //     sha256_dev(&sha256_ctx, tmp, 32); // 32 bytes
+        
+        
+    //     if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
+    //     {
+    //         *nonceValidDev = nonce;
+    //         break;
+    //     }
     // }
-    
-
-    blk = (HashBlock *)sm;
-
-    unsigned int exp = blk->nbits >> 24;
-    unsigned int mant = blk->nbits & 0xffffff;
-    unsigned char target_hex[32] = {};
-    
-    unsigned int shift = 8 * (exp - 3);
-    unsigned int sb = shift >> 3; 
-    unsigned int rb = shift % 8; 
-    
-    target_hex[sb    ] = (mant << rb);      
-    target_hex[sb + 1] = (mant >> (8-rb));  
-    target_hex[sb + 2] = (mant >> (16-rb)); 
-    target_hex[sb + 3] = (mant >> (24-rb)); 
-
-    // ------------------ only run above code: 67us -------------------------
-
-
-    SHA256 sha256_ctx;
-    unsigned int nonce;
-    
-    for(nonce = gtid * N_TSK_PER_THRD; nonce < (gtid + 1) * N_TSK_PER_THRD; ++nonce) 
-    {       
-
-        SHA256 tmp;
-        // sha256_dev(&tmp, (BYTE*)&blk, BLK_HDR_SIZE); // 80 bytes
-        
-        sha256_wholeBlkhdr_dev(&tmp, sm, nonce);
-
-        sha256_dev(&sha256_ctx, (BYTE*)&tmp, sizeof(tmp)); // 32 bytes
-        
-        
-        if(little_endian_bit_comparison_dev(sha256_ctx.b, target_hex, 32) < 0)  
-        {
-            *nonceValidDev = blk.nonce;
-            break;
-        }
-    }
 }
 
 

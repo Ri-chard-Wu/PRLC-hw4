@@ -120,14 +120,26 @@ __global__ void kernel()
 
 int main(int argc, char **argv)
 {
+    int a = 0x0123f7aa;
 
-    auto start = high_resolution_clock::now();
+    unsigned char *ptr = (unsigned char *)&a;
+
+    printf("ptr[0]: %d\n", ptr[0]);
+    printf("ptr[1]: %d\n", ptr[1]);
+    printf("ptr[2]: %d\n", ptr[2]);
+    printf("ptr[3]: %d\n", ptr[3]);
+
+
+
+
+
+    // auto start = high_resolution_clock::now();
     
-    kernel<<<2, 5>>>(); 
+    // kernel<<<2, 5>>>(); 
 
-    auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<microseconds>(stop - start);
-    cout<<"kernel() time: "<<duration.count()<<" us"<<endl;
+    // auto stop = high_resolution_clock::now();
+    // auto duration = duration_cast<microseconds>(stop - start);
+    // cout<<"kernel() time: "<<duration.count()<<" us"<<endl;
 
 
     // cudaMemcpy(&b_host, b_dev, sizeof(int), cudaMemcpyDeviceToHost);
