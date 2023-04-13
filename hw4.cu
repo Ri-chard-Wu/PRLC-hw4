@@ -23,21 +23,13 @@ using namespace std;
 #define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 18
 #define N_THRD_PER_BLK_EXP 7  
 
-#define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 2048
+#define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 2048 (2560 SM's)
 #define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 128
 #define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 16384
 
-
-
-// #define N_TSK_EXP 32
-// #define N_TSK_PER_THRD_EXP 13
-// #define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 19
-// #define N_THRD_PER_BLK_EXP 5
-
-// #define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 16384
-// #define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 32
-// #define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 8192
-
+// #define N_BLK 2560 
+// #define N_THRD_PER_BLK 256
+// #define N_TSK_PER_THRD 6554 
 
 
 
@@ -345,12 +337,21 @@ __device__
 void sha256_stage1_dev(SHA256 *tmp, unsigned char *sm, unsigned int nonce){
 
 	WORD i, j;
+    WORD a, b, c, d, e, f, g, h;
+	BYTE msg[64] = {0}; // --------------------------------- 64 bytes
+	WORD w[64]; // --------------------------------- 256 bytes
+
+	a = tmp->h[0];
+	b = tmp->h[1];
+	c = tmp->h[2];
+	d = tmp->h[3];
+	e = tmp->h[4];
+	f = tmp->h[5];
+	g = tmp->h[6];
+	h = tmp->h[7];
 
 
-	BYTE msg[64] = {0};
     ((WORD *)(&msg[12]))[0] = nonce;
-
-
 
 
 	for(i=64, j=0; i < 76; ++i, ++j) 
@@ -368,13 +369,7 @@ void sha256_stage1_dev(SHA256 *tmp, unsigned char *sm, unsigned int nonce){
 	msg[57] = 0;
 	msg[56] = 0;
 
-
-
     // #############################################
-
-    WORD a, b, c, d, e, f, g, h;	
-
-	WORD w[64];
 
 	for(i=0, j=0; i < 16; ++i, j += 4)
 	{
@@ -390,17 +385,7 @@ void sha256_stage1_dev(SHA256 *tmp, unsigned char *sm, unsigned int nonce){
 	}
 	
 
-	a = tmp->h[0];
-	b = tmp->h[1];
-	c = tmp->h[2];
-	d = tmp->h[3];
-	e = tmp->h[4];
-	f = tmp->h[5];
-	g = tmp->h[6];
-	h = tmp->h[7];
-	
-
-	for(i=0;i<64;++i)
+	for(i=0; i < 64; ++i)
 	{
 		WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
 		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
@@ -429,10 +414,7 @@ void sha256_stage1_dev(SHA256 *tmp, unsigned char *sm, unsigned int nonce){
 	tmp->h[6] += g;
 	tmp->h[7] += h;
 
-
-
     // #############################################
-	
 
 	for(i = 0; i < 32 ; i += 4)
 	{
@@ -576,7 +558,7 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
     int gtid = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = threadIdx.x;
 
-    __shared__ unsigned char sm[80 + 32];
+    __shared__ unsigned char sm[80 + 32 + 40960];
 
     HashBlock *blk;
 
