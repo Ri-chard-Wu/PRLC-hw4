@@ -1,26 +1,24 @@
-hw4.cu(77): warning: missing return statement at end of non-void function "decode"
+hw4.cu(95): warning: missing return statement at end of non-void function "decode"
 
-hw4.cu(94): warning: expression has no effect
+hw4.cu(112): warning: expression has no effect
 
-hw4.cu(94): warning: expression has no effect
+hw4.cu(112): warning: expression has no effect
 
-hw4.cu(363): warning: integer conversion resulted in truncation
+hw4.cu(362): warning: integer conversion resulted in truncation
 
-hw4.cu(460): warning: integer conversion resulted in truncation
+hw4.cu(396): warning: variable "j" was declared but never referenced
 
-hw4.cu(448): warning: variable "len" was declared but never referenced
+hw4.cu(520): warning: integer conversion resulted in truncation
 
-hw4.cu(449): warning: variable "remain" was declared but never referenced
+hw4.cu(648): warning: variable "nlz_target" was declared but never referenced
 
-hw4.cu(450): warning: variable "total_len" was declared but never referenced
+hw4.cu(95): warning: missing return statement at end of non-void function "decode"
 
-hw4.cu(77): warning: missing return statement at end of non-void function "decode"
+hw4.cu(112): warning: expression has no effect
 
-hw4.cu(94): warning: expression has no effect
+hw4.cu(112): warning: expression has no effect
 
-hw4.cu(94): warning: expression has no effect
+hw4.cu(362): warning: integer conversion resulted in truncation
 
-hw4.cu(363): warning: integer conversion resulted in truncation
-
-hw4.cu(460): warning: integer conversion resulted in truncation
+hw4.cu(520): warning: integer conversion resulted in truncation
 
