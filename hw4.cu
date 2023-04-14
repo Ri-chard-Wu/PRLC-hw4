@@ -220,44 +220,36 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 // ###############################################################################
 
 
+// __device__ 
+// int little_endian_bit_comparison_dev(const unsigned char *a, 
+//                                         const unsigned char *b){
+    
 __device__ 
-int little_endian_bit_comparison_dev(const unsigned char *a, 
-                                        const unsigned char *b, size_t byte_len){
-    
-    // long long int *ptr_a = ((long long int *)a);
-    // long long int *ptr_b = ((long long int *)b);
-    // int lz_a, lz_b;
-    
+int little_endian_bit_comparison_dev(const byte_group_t *a, 
+                                        const unsigned char *b){
 
-    // for(int i=3; i >= 0 ; i--){
-        
-    //     lz_a = __clzll(ptr_a[i]);
-    //     lz_b = __clzll(ptr_b[i]);
 
-    //     if(lz_a  > lz_b) // most likely.
+    // for(int i = 32 - 1; i >= 0; --i)
+    // {
+    //     if(a[i] < b[i])
     //         return -1;
-    //     else if(lz_a  < lz_b)
+    //     else if(a[i] > b[i])
     //         return 1;
-    //     else{
+    // }
 
-    //         if(ptr_a[i]  < ptr_b[i])
-    //             return -1;
-    //         else if(ptr_a[i]  > ptr_b[i])
-    //             return 1;
 
-    //     }
-
-    // }                    
-
-    // compared from lowest bit
-    for(int i = byte_len - 1; i >= 0; --i)
+    for(int i = 7; i >= 0; --i)
     {
-        if(a[i] < b[i])
-            return -1;
-        else if(a[i] > b[i])
-            return 1;
-    }
+        for(int j = 3; j >= 0; --j){
+            
+            if(a[N_THRD_PER_BLK * i].b[j] < b[4 * i + j])
+                return -1;
+            else if(a[N_THRD_PER_BLK * i].b[j] > b[4 * i + j])
+                return 1;
+        }
 
+    }
+    
     return 0;
 }
 
@@ -359,21 +351,10 @@ void sha256_commonBlkhdr_dev(SHA256 *ctx, const BYTE *msg){
 
 
 __device__ 
-void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
+void sha256_stage1_dev(byte_group_t *sm, unsigned int nonce){
 
 	WORD i, j;
     WORD a, b, c, d, e, f, g, h;
-
-
-	a = tmp->h[0];
-	b = tmp->h[1];
-	c = tmp->h[2];
-	d = tmp->h[3];
-	e = tmp->h[4];
-	f = tmp->h[5];
-	g = tmp->h[6];
-	h = tmp->h[7];
-
 
 
 
@@ -461,9 +442,6 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 	}
 
 
-
-
-
 	// for( i = 16; i < 64; ++i)
 	// {
 	// 	WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
@@ -487,6 +465,23 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 	}
 
 
+	// a = tmp->h[0];
+	// b = tmp->h[1];
+	// c = tmp->h[2];
+	// d = tmp->h[3];
+	// e = tmp->h[4];
+	// f = tmp->h[5];
+	// g = tmp->h[6];
+	// h = tmp->h[7];
+
+	a = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[0];
+	b = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[1];
+	c = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[2];
+	d = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[3];
+	e = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[4];
+	f = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[5];
+	g = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[6];
+	h = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[7];
 
 
 
@@ -510,22 +505,46 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 	}
 
 
-	tmp->h[0] += a;
-	tmp->h[1] += b;
-	tmp->h[2] += c;
-	tmp->h[3] += d;
-	tmp->h[4] += e;
-	tmp->h[5] += f;
-	tmp->h[6] += g;
-	tmp->h[7] += h;
+	// tmp->h[0] += a;
+	// tmp->h[1] += b;
+	// tmp->h[2] += c;
+	// tmp->h[3] += d;
+	// tmp->h[4] += e;
+	// tmp->h[5] += f;
+	// tmp->h[6] += g;
+	// tmp->h[7] += h;
+
+    for(int i=0; i < 16; i++){
+        ((WORD *)&msg[N_THRD_PER_BLK * i])[0] = 0;
+    }
+
+	((WORD *)&msg[N_THRD_PER_BLK * 0])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[0] + a;
+	((WORD *)&msg[N_THRD_PER_BLK * 1])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[1] + b;
+	((WORD *)&msg[N_THRD_PER_BLK * 2])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[2] + c;
+	((WORD *)&msg[N_THRD_PER_BLK * 3])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[3] + d;
+	((WORD *)&msg[N_THRD_PER_BLK * 4])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[4] + e;
+	((WORD *)&msg[N_THRD_PER_BLK * 5])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[5] + f;
+	((WORD *)&msg[N_THRD_PER_BLK * 6])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[6] + g;
+	((WORD *)&msg[N_THRD_PER_BLK * 7])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[7] + h;
+
+
 
     // #############################################
 
-	for(i = 0; i < 32 ; i += 4)
+	// for(i = 0; i < 32 ; i += 4)
+	// {
+    //     _swap(tmp->b[i], tmp->b[i+3]);
+    //     _swap(tmp->b[i+1], tmp->b[i+2]);
+	// }
+
+	for(i = 0; i < 8 ; i += 1)
 	{
-        _swap(tmp->b[i], tmp->b[i+3]);
-        _swap(tmp->b[i+1], tmp->b[i+2]);
+       
+        _swap(msg[N_THRD_PER_BLK * i].b[0], msg[N_THRD_PER_BLK * i].b[3]);
+        _swap(msg[N_THRD_PER_BLK * i].b[1], msg[N_THRD_PER_BLK * i].b[2]);
+        
 	}
+
 }
 
 
@@ -537,17 +556,12 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 
 
 
-__device__ 
-void sha256_stage2_dev(SHA256 *ctx, const BYTE *tmp, byte_group_t *sm){
+// __device__ 
+// void sha256_stage2_dev(SHA256 *ctx, const BYTE *tmp, byte_group_t *sm){
 
-	// ctx->h[0] = 0x6a09e667;
-	// ctx->h[1] = 0xbb67ae85;
-	// ctx->h[2] = 0x3c6ef372;
-	// ctx->h[3] = 0xa54ff53a;
-	// ctx->h[4] = 0x510e527f;
-	// ctx->h[5] = 0x9b05688c;
-	// ctx->h[6] = 0x1f83d9ab;
-	// ctx->h[7] = 0x5be0cd19;
+
+__device__ 
+void sha256_stage2_dev(byte_group_t *sm){
 	
 	WORD i, j;
     WORD a, b, c, d, e, f, g, h;	
@@ -557,9 +571,9 @@ void sha256_stage2_dev(SHA256 *ctx, const BYTE *tmp, byte_group_t *sm){
 
     byte_group_t *msg;
     msg = &sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x];
-    for(int i=0; i < 16; i++){
-        ((WORD *)&msg[N_THRD_PER_BLK * i])[0] = 0;
-    }
+    // for(int i=0; i < 16; i++){
+    //     ((WORD *)&msg[N_THRD_PER_BLK * i])[0] = 0;
+    // }
 
 
 	// WORD w[64];
@@ -574,10 +588,10 @@ void sha256_stage2_dev(SHA256 *ctx, const BYTE *tmp, byte_group_t *sm){
 	// 	msg[i] = tmp[i];
 	// }
 
-	for(i=0; i < 8; ++i) 
-	{
-		((WORD *)&msg[N_THRD_PER_BLK * i])[0] = ((WORD *)tmp)[i];
-	}
+	// for(i=0; i < 8; ++i) 
+	// {
+	// 	((WORD *)&msg[N_THRD_PER_BLK * i])[0] = ((WORD *)tmp)[i];
+	// }
 
 
 
@@ -677,23 +691,44 @@ void sha256_stage2_dev(SHA256 *ctx, const BYTE *tmp, byte_group_t *sm){
 	}
 
 
-	ctx->h[0] = a + 0x6a09e667;
-	ctx->h[1] = b + 0xbb67ae85;
-	ctx->h[2] = c + 0x3c6ef372;
-	ctx->h[3] = d + 0xa54ff53a;
-	ctx->h[4] = e + 0x510e527f;
-	ctx->h[5] = f + 0x9b05688c;
-	ctx->h[6] = g + 0x1f83d9ab;
-	ctx->h[7] = h + 0x5be0cd19;
+	// ctx->h[0] = a + 0x6a09e667;
+	// ctx->h[1] = b + 0xbb67ae85;
+	// ctx->h[2] = c + 0x3c6ef372;
+	// ctx->h[3] = d + 0xa54ff53a;
+	// ctx->h[4] = e + 0x510e527f;
+	// ctx->h[5] = f + 0x9b05688c;
+	// ctx->h[6] = g + 0x1f83d9ab;
+	// ctx->h[7] = h + 0x5be0cd19;
+
+
+	((WORD *)&msg[N_THRD_PER_BLK * 0])[0] = a + 0x6a09e667;
+	((WORD *)&msg[N_THRD_PER_BLK * 1])[0] = b + 0xbb67ae85;
+	((WORD *)&msg[N_THRD_PER_BLK * 2])[0] = c + 0x3c6ef372;
+	((WORD *)&msg[N_THRD_PER_BLK * 3])[0] = d + 0xa54ff53a;
+	((WORD *)&msg[N_THRD_PER_BLK * 4])[0] = e + 0x510e527f;
+	((WORD *)&msg[N_THRD_PER_BLK * 5])[0] = f + 0x9b05688c;
+	((WORD *)&msg[N_THRD_PER_BLK * 6])[0] = g + 0x1f83d9ab;
+	((WORD *)&msg[N_THRD_PER_BLK * 7])[0] = h + 0x5be0cd19;
+    
 
     // ########################################
 
 
-	for(i = 0; i < 32 ; i += 4)
+	// for(i = 0; i < 32 ; i += 4)
+	// {
+    //     _swap(ctx->b[i], ctx->b[i+3]);
+    //     _swap(ctx->b[i+1], ctx->b[i+2]);
+	// }
+
+
+	for(i = 0; i < 8 ; i += 1)
 	{
-        _swap(ctx->b[i], ctx->b[i+3]);
-        _swap(ctx->b[i+1], ctx->b[i+2]);
+       
+        _swap(msg[N_THRD_PER_BLK * i].b[0], msg[N_THRD_PER_BLK * i].b[3]);
+        _swap(msg[N_THRD_PER_BLK * i].b[1], msg[N_THRD_PER_BLK * i].b[2]);
+        
 	}
+
 }
 
 
@@ -752,22 +787,25 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
 
     __syncthreads();
 
-    SHA256 sha256_ctx;
+    // SHA256 sha256_ctx;
     unsigned int nonce;
-    BYTE tmp[32];
+    // BYTE tmp[32];
     
     for(nonce = gtid * N_TSK_PER_THRD; nonce < (gtid + 1) * N_TSK_PER_THRD; ++nonce) 
     {       
         
-        ((int4 *)(tmp))[0] = ((int4 *)(&sm[BASE_ADDR_BLKHDR_COMMON_SHA]))[0];
-        ((int4 *)(tmp))[1] = ((int4 *)(&sm[BASE_ADDR_BLKHDR_COMMON_SHA]))[1];
+        // ((int4 *)(tmp))[0] = ((int4 *)(&sm[BASE_ADDR_BLKHDR_COMMON_SHA]))[0];
+        // ((int4 *)(tmp))[1] = ((int4 *)(&sm[BASE_ADDR_BLKHDR_COMMON_SHA]))[1];
         
-        sha256_stage1_dev((SHA256 *)tmp, sm, nonce);
+        sha256_stage1_dev(sm, nonce);
 
-        sha256_stage2_dev(&sha256_ctx, tmp, sm); // 32 bytes
+        // sha256_stage2_dev(&sha256_ctx, tmp, sm); // 32 bytes
+        sha256_stage2_dev(sm); // 32 bytes
         
         
-        if(little_endian_bit_comparison_dev(sha256_ctx.b, (BYTE *)&sm[BASE_ADDR_TD], 32) < 0)  
+        // if(little_endian_bit_comparison_dev(sha256_ctx.b, (BYTE *)&sm[BASE_ADDR_TD]) < 0)  
+        if(little_endian_bit_comparison_dev(&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x], 
+                                (BYTE *)&sm[BASE_ADDR_TD]) < 0)  
         {
             *nonceValidDev = nonce;
             break;
