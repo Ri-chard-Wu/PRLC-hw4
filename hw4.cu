@@ -388,10 +388,10 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 
 
 
-    WORD w[64]; // --------------------------------- 256 bytes
+    // WORD w[64]; // --------------------------------- 256 bytes
 
-    // WORD *w;
-    // w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + 2048 + threadIdx.x];
+    WORD *w;
+    w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + 2048 + threadIdx.x];
 
 
 
@@ -454,7 +454,7 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 
 	for(i=0; i < 16; ++i)
 	{
-		w[i] = (msg[N_THRD_PER_BLK * i].b[0]<<24) | \
+		w[N_THRD_PER_BLK * i] = (msg[N_THRD_PER_BLK * i].b[0]<<24) | \
                 (msg[N_THRD_PER_BLK * i].b[1]<<16)| \
                 (msg[N_THRD_PER_BLK * i].b[2]<<8) | \
                 (msg[N_THRD_PER_BLK * i].b[3]);
@@ -464,13 +464,31 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 
 
 
+	// for( i = 16; i < 64; ++i)
+	// {
+	// 	WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
+	// 	WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
+	// 	w[i] = w[i-16] + s0 + w[i-7] + s1;
+	// }
+
+
 	for( i = 16; i < 64; ++i)
 	{
-		WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
-		WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
-		w[i] = w[i-16] + s0 + w[i-7] + s1;
+		WORD s0 = (_rotr(w[N_THRD_PER_BLK * (i-15)], 7)) ^ \
+                  (_rotr(w[N_THRD_PER_BLK * (i-15)], 18)) ^ \
+                  (w[N_THRD_PER_BLK * (i-15)] >> 3);
+
+		WORD s1 = (_rotr(w[N_THRD_PER_BLK * (i-2)], 17)) ^ \
+                  (_rotr(w[N_THRD_PER_BLK * (i-2)], 19)) ^ \
+                  (w[N_THRD_PER_BLK * (i-2)] >> 10);
+
+		w[N_THRD_PER_BLK * i] = w[N_THRD_PER_BLK * (i-16)] + \
+                                    s0 + w[N_THRD_PER_BLK * (i-7)] + s1;
 	}
-	
+
+
+
+
 
 	for(i=0; i < 64; ++i)
 	{
@@ -478,7 +496,7 @@ void sha256_stage1_dev(SHA256 *tmp, byte_group_t *sm, unsigned int nonce){
 		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
 		WORD ch = (e & f) ^ ((~e) & g);
 		WORD maj = (a & b) ^ (a & c) ^ (b & c);
-		WORD temp1 = h + S1 + ch + k_dev[i] + w[i];
+		WORD temp1 = h + S1 + ch + k_dev[i] + w[N_THRD_PER_BLK * i];
 		WORD temp2 = S0 + maj;
 		
 		h = g;
@@ -534,53 +552,100 @@ void sha256_stage2_dev(SHA256 *ctx, const BYTE *tmp, byte_group_t *sm){
 	WORD i, j;
     WORD a, b, c, d, e, f, g, h;	
 
-    BYTE msg[64] = {};
-	WORD w[64];
 
-    // BYTE *msg;
-    // WORD *w;
+    // BYTE msg[64] = {};
 
-    // msg = (BYTE *)&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x * SIZE_THRD_LOCAL_SM];
-   
-    // for(int i=0; i < 16; i++){
-    //     ((WORD *)msg)[i] = 0;
-    // }
-
-    // w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x \
-    //                                         * SIZE_THRD_LOCAL_SM + 64];
+    byte_group_t *msg;
+    msg = &sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x];
+    for(int i=0; i < 16; i++){
+        ((WORD *)&msg[N_THRD_PER_BLK * i])[0] = 0;
+    }
 
 
+	// WORD w[64];
+
+    WORD *w;
+    w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + 2048 + threadIdx.x];
+
+    
 	
-	for(i=0; i < 32; ++i) 
+	// for(i=0; i < 32; ++i) 
+	// {
+	// 	msg[i] = tmp[i];
+	// }
+
+	for(i=0; i < 8; ++i) 
 	{
-		msg[i] = tmp[i];
+		((WORD *)&msg[N_THRD_PER_BLK * i])[0] = ((WORD *)tmp)[i];
 	}
 
-	msg[32] = 0x80;  
-	msg[63] = 256;
-	msg[62] = 1;
-	msg[61] = 0;
-	msg[60] = 0;
-	msg[59] = 0;
-	msg[58] = 0;
-	msg[57] = 0;
-	msg[56] = 0;
+
+
+    
+	// msg[32] = 0x80;  
+    msg[N_THRD_PER_BLK * 8].b[0] = 0x80;  
+
+	// msg[63] = 256;
+	// msg[62] = 1;
+	// msg[61] = 0;
+	// msg[60] = 0;
+    msg[N_THRD_PER_BLK * 15].b[3] = 256;  
+    msg[N_THRD_PER_BLK * 15].b[2] = 1;  
+    msg[N_THRD_PER_BLK * 15].b[1] = 0;  
+    msg[N_THRD_PER_BLK * 15].b[0] = 0;  
+
+
+	// msg[59] = 0;
+	// msg[58] = 0;
+	// msg[57] = 0;
+	// msg[56] = 0;
+    msg[N_THRD_PER_BLK * 14].b[3] = 0;  
+    msg[N_THRD_PER_BLK * 14].b[2] = 0;  
+    msg[N_THRD_PER_BLK * 14].b[1] = 0;  
+    msg[N_THRD_PER_BLK * 14].b[0] = 0;  
+
+
 
     // ########################################	
 
-	for(i=0, j=0; i < 16; ++i, j += 4)
+	// for(i=0, j=0; i < 16; ++i, j += 4)
+	// {
+	// 	w[i] = (msg[j]<<24) | (msg[j+1]<<16) | (msg[j+2]<<8) | (msg[j+3]);
+	// }
+
+	for(i=0; i < 16; ++i)
 	{
-		w[i] = (msg[j]<<24) | (msg[j+1]<<16) | (msg[j+2]<<8) | (msg[j+3]);
+		w[N_THRD_PER_BLK * i] = (msg[N_THRD_PER_BLK * i].b[0]<<24) | \
+                (msg[N_THRD_PER_BLK * i].b[1]<<16)| \
+                (msg[N_THRD_PER_BLK * i].b[2]<<8) | \
+                (msg[N_THRD_PER_BLK * i].b[3]);
 	}
-	
+
+
+
+
+	// for( i = 16; i < 64; ++i)
+	// {
+	// 	WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
+	// 	WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
+	// 	w[i] = w[i-16] + s0 + w[i-7] + s1;
+	// }
 
 	for( i = 16; i < 64; ++i)
 	{
-		WORD s0 = (_rotr(w[i-15], 7)) ^ (_rotr(w[i-15], 18)) ^ (w[i-15] >> 3);
-		WORD s1 = (_rotr(w[i-2], 17)) ^ (_rotr(w[i-2], 19))  ^ (w[i-2] >> 10);
-		w[i] = w[i-16] + s0 + w[i-7] + s1;
+		WORD s0 = (_rotr(w[N_THRD_PER_BLK * (i-15)], 7)) ^ \
+                  (_rotr(w[N_THRD_PER_BLK * (i-15)], 18)) ^ \
+                  (w[N_THRD_PER_BLK * (i-15)] >> 3);
+
+		WORD s1 = (_rotr(w[N_THRD_PER_BLK * (i-2)], 17)) ^ \
+                  (_rotr(w[N_THRD_PER_BLK * (i-2)], 19)) ^ \
+                  (w[N_THRD_PER_BLK * (i-2)] >> 10);
+
+		w[N_THRD_PER_BLK * i] = w[N_THRD_PER_BLK * (i-16)] + \
+                                    s0 + w[N_THRD_PER_BLK * (i-7)] + s1;
 	}
-	
+
+
 
 	a = 0x6a09e667;
 	b = 0xbb67ae85;
@@ -598,7 +663,7 @@ void sha256_stage2_dev(SHA256 *ctx, const BYTE *tmp, byte_group_t *sm){
 		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
 		WORD ch = (e & f) ^ ((~e) & g);
 		WORD maj = (a & b) ^ (a & c) ^ (b & c);
-		WORD temp1 = h + S1 + ch + k_dev[i] + w[i];
+		WORD temp1 = h + S1 + ch + k_dev[i] + w[N_THRD_PER_BLK * i];
 		WORD temp2 = S0 + maj;
 		
 		h = g;
