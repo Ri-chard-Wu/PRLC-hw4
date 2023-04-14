@@ -1,4 +1,4 @@
-NVFLAGS := -std=c++11 -O3 
+NVFLAGS := -std=c++11 -O3
 TARGET := main
 
 .PHONY: all

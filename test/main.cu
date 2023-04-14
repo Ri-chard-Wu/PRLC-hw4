@@ -18,66 +18,92 @@
 using namespace std::chrono;
 using namespace std;
 
-#define _rotl(v, s) ((v)<<(s) | (v)>>(32-(s)))
-#define _rotr(v, s) ((v)>>(s) | (v)<<(32-(s)))
-
-#define _swap(x, y) (((x)^=(y)), ((y)^=(x)), ((x)^=(y)))
-
-
-typedef struct _block
-{
-    unsigned int version;
-    unsigned char prevhash[32];
-    unsigned char merkle_root[32];
-    unsigned int ntime;
-    unsigned int nbits;
-    unsigned int nonce;
-}HashBlock;
-
-
-__device__ 
-void f2(int *a){
-    printf("f2()\n");
-    a[1] = 22;
-
-}
-
-__device__ void f1(int *sm){
-    printf("f1()\n");
-    printf("sm[0]: %d\n", sm[0]);
-    // a[0] = 12;
-    // f2(a);
-}
 
 
 
 
 
+// ============== Non-strided ===================
 
 
-
+// #define N_THRD 128
+// #define SIZE_LSM 320
 
 // __global__ void kernel()
 // {
-//     // __shared__ double sm[20 * 5];
-
-
-//     double a[10], sum;
     
-//     sum = 0;
+//     int gtid = blockIdx.x * blockDim.x + threadIdx.x;
+//     int tid = threadIdx.x;
 
-//     for(int i=0;i<10;i++){
-//         a[i] = i * (blockIdx.x + 1) * (threadIdx.x + 1);
-//         for(int j=0;j<10000000;j++){
-//             a[i] *= 1.00000001; 
+//     __shared__ unsigned char sm[SIZE_LSM * N_THRD]; // 40960
+
+
+//     unsigned char *lsm = &sm[SIZE_LSM * tid];
+
+//     for(int i=0; i < SIZE_LSM; i++){
+//         lsm[i] = tid + i;
+//     }
+
+
+//     double value;
+//     for(int i=0; i < SIZE_LSM; i++){
+
+//         value = lsm[i] + lsm[i];
+//         lsm[i] = value;
+
+//     }
+
+//     int sum = 0;
+//     for(int i=0; i < SIZE_LSM; i++){
+//         sum += lsm[i];
+//     }
+
+//     printf("[%d, %d] sum: %d\n", blockIdx.x, threadIdx.x, sum);
+// }
+
+
+
+
+
+
+
+// // ============== Stride size: 1 byte ===================
+
+// #define N_THRD 128
+// #define SIZE_LSM 320
+
+// __global__ void kernel()
+// {
+    
+//     int gtid = blockIdx.x * blockDim.x + threadIdx.x;
+//     int tid = threadIdx.x;
+
+//     __shared__ unsigned char sm[SIZE_LSM * N_THRD]; // 40960
+
+
+//     unsigned char *lsm = &sm[tid];
+//     int sum = 0;
+
+//     for(int i=0; i < SIZE_LSM; i++){
+//         lsm[N_THRD * i] = tid + i ;
+//     }
+
+
+ 
+//     for(int i=0; i < SIZE_LSM; i++){
+
+//         for(int j=0;j<500000;j++){
+//             lsm[N_THRD * i] = lsm[N_THRD * i] * tid + i;
 //         }
-//         sum += a[i];
+
 //     }
 
     
-//     printf("[%d, %d]: %f\n", blockIdx.x, threadIdx.x, sum);
-    
+//     for(int i=0; i < SIZE_LSM; i++){
+//         sum += lsm[N_THRD * i];
+//     }
 
+//     printf("[%d, %d] sum: %d\n", blockIdx.x, threadIdx.x, sum);
 // }
 
 
@@ -88,31 +114,105 @@ __device__ void f1(int *sm){
 
 
 
+// // ============== non-strided: 1 word ===================
+
+// #define N_THRD 128
+// #define SIZE_LSM 320
+
+// __global__ void kernel()
+// {
+    
+//     int gtid = blockIdx.x * blockDim.x + threadIdx.x;
+//     int tid = threadIdx.x;
+
+//     __shared__ unsigned int sm[(SIZE_LSM / 4) * N_THRD]; // 40960
+
+
+//     unsigned int *lsm = &sm[(SIZE_LSM / 4) * tid];
+
+
+//     for(int i=0; i < SIZE_LSM / 4; i++){
+//         for(int j=0;j<4;j++){
+//             ((unsigned char *)&lsm[i])[j] = tid + (4 * i + j);
+//         }
+//     }
+
+
+//     for(int i=0; i < SIZE_LSM / 4; i++){
+//         for(int j=0;j<4;j++){
+//             for(int k=0;k<500000;k++){
+//                 ((unsigned char *)&lsm[i])[j] = \
+//                             ((unsigned char *)&lsm[i])[j] * tid + (4 * i + j);
+//             }
+//         }
+//     }
+
+
+
+//     int sum = 0;
+//     for(int i=0; i < SIZE_LSM / 4; i++){
+//         for(int j=0;j<4;j++){
+//            sum += ((unsigned char *)&lsm[i])[j];
+//         }
+//     }
+
+
+//     printf("[%d, %d] sum: %d\n", blockIdx.x, threadIdx.x, sum);
+// }
+
+
+
+
+
+// ============== Stride size: 1 word ===================
+
+#define N_THRD 128
+#define SIZE_LSM 320
 
 __global__ void kernel()
 {
-    __shared__ double sm[10*5]; // 3.2 kB
     
+    int gtid = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = threadIdx.x;
 
+    __shared__ unsigned int sm[(SIZE_LSM / 4) * N_THRD]; // 40960
 
-    // double a[10], sum;
-    
-    double sum = 0;
 
-    for(int i=0;i<10;i++){
-        sm[10 * tid + i] = i * (blockIdx.x + 1) * (threadIdx.x + 1);
-        for(int j=0;j<10000000;j++){
-            sm[10 * tid + i] *= 1.00000001; 
+    unsigned int *lsm = &sm[tid];
+
+
+    for(int i=0; i < SIZE_LSM / 4; i++){
+        for(int j=0;j<4;j++){
+            ((unsigned char *)&lsm[N_THRD * i])[j] = tid + (4 * i + j);
         }
-        sum += sm[10 * tid + i];
     }
 
-    
-    printf("[%d, %d]: %f\n", blockIdx.x, threadIdx.x, sum);
-    
 
+    for(int i=0; i < SIZE_LSM / 4; i++){
+        for(int j=0;j<4;j++){
+            for(int k=0;k<500000;k++){
+                ((unsigned char *)&lsm[N_THRD * i])[j] = \
+                            ((unsigned char *)&lsm[N_THRD * i])[j] * tid + (4 * i + j);
+            }
+        }
+    }
+
+
+
+    int sum = 0;
+    for(int i=0; i < SIZE_LSM / 4; i++){
+        for(int j=0;j<4;j++){
+           sum += ((unsigned char *)&lsm[N_THRD * i])[j];
+        }
+    }
+
+
+    printf("[%d, %d] sum: %d\n", blockIdx.x, threadIdx.x, sum);
 }
+
+
+
+
 
 
 
@@ -120,34 +220,15 @@ __global__ void kernel()
 
 int main(int argc, char **argv)
 {
-    int a = 0x0123f7aa;
-
-    unsigned char *ptr = (unsigned char *)&a;
-
-    printf("ptr[0]: %d\n", ptr[0]);
-    printf("ptr[1]: %d\n", ptr[1]);
-    printf("ptr[2]: %d\n", ptr[2]);
-    printf("ptr[3]: %d\n", ptr[3]);
-
-
-
-
-
-    // auto start = high_resolution_clock::now();
+ 
+    auto start = high_resolution_clock::now();
     
-    // kernel<<<2, 5>>>(); 
-
-    // auto stop = high_resolution_clock::now();
-    // auto duration = duration_cast<microseconds>(stop - start);
-    // cout<<"kernel() time: "<<duration.count()<<" us"<<endl;
-
-
-    // cudaMemcpy(&b_host, b_dev, sizeof(int), cudaMemcpyDeviceToHost);
-
-    // printf("b_host: %d\n", b_host);
-
-    // printf("main()\n");
+    kernel<<<1, N_THRD>>>(); 
     cudaDeviceSynchronize();
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+    cout<<" time: "<<duration.count() / 1000<<" ms"<<endl;
 
     return 0;
 }
