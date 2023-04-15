@@ -19,7 +19,9 @@ if [ -f "$RunFile" ]; then
     echo "==================================="
 
     export CUDA_VISIBLE_DEVICES=0
-    ./$RunFile $inFile $outFile 2> run-stderr.out
+    
+    # ./$RunFile $inFile $outFile > run-stderr.out
+    nvprof --metrics ipc ./$RunFile $inFile $outFile > run-stderr.out
 
     echo "==================================="
     echo "=      Print run-stderr.out       ="

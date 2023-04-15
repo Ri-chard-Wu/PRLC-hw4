@@ -13,6 +13,108 @@ extern "C"{
 
 #define _swap(x, y) (((x)^=(y)), ((y)^=(x)), ((x)^=(y)))
 
+#define ROTLEFT(a,b) (((a) << (b)) | ((a) >> (32-(b))))
+#define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32-(b))))
+
+#define CH(x,y,z) (((x) & (y)) ^ (~(x) & (z)))
+#define MAJ(x,y,z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define EP0(x) (ROTRIGHT(x,2) ^ ROTRIGHT(x,13) ^ ROTRIGHT(x,22))
+#define EP1(x) (ROTRIGHT(x,6) ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
+#define SIG0(x) (ROTRIGHT(x,7) ^ ROTRIGHT(x,18) ^ ((x) >> 3))
+#define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
+
+#define SHA256_COMPRESS_8X 								\
+	for (i = 0; i < 64; i+=8) {							\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i] + w[N_THRD_PER_BLK * i];		\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+														\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i+1] + w[N_THRD_PER_BLK * (i+1)];	\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+														\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i+2] + w[N_THRD_PER_BLK * (i+2)];	\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+														\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i+3] + w[N_THRD_PER_BLK * (i+3)];	\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+														\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i+4] + w[N_THRD_PER_BLK * (i+4)];	\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+														\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i+5] + w[N_THRD_PER_BLK * (i+5)];	\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+														\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i+6] + w[N_THRD_PER_BLK * (i+6)];	\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+														\
+		t1 = h + EP1(e) + CH(e,f,g) + k[i+7] + w[N_THRD_PER_BLK * (i+7)];	\
+		t2 = EP0(a) + MAJ(a,b,c);						\
+		h = g;											\
+		g = f;											\
+		f = e;											\
+		e = d + t1;										\
+		d = c;											\
+		c = b;											\
+		b = a;											\
+		a = t1 + t2;									\
+	}
+
+
 
 //--------------- DATA TYPES --------------
 typedef unsigned int WORD;

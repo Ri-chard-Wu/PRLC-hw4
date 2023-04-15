@@ -1,0 +1,2 @@
+read tx & calc_merkle_root() time: 0.521053 sec
+nonceSearch() time: 3.66632 sec

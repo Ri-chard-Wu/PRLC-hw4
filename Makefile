@@ -1,4 +1,4 @@
-NVFLAGS := -std=c++11 -O0
+NVFLAGS := -std=c++11 -O3
 TARGET := hw4
 
 .PHONY: all

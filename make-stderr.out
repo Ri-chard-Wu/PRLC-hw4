@@ -1,24 +1,20 @@
-hw4.cu(95): warning: missing return statement at end of non-void function "decode"
+hw4.cu(92): warning: missing return statement at end of non-void function "decode"
 
-hw4.cu(112): warning: expression has no effect
+hw4.cu(109): warning: expression has no effect
 
-hw4.cu(112): warning: expression has no effect
+hw4.cu(109): warning: expression has no effect
 
-hw4.cu(362): warning: integer conversion resulted in truncation
+hw4.cu(371): warning: integer conversion resulted in truncation
 
-hw4.cu(396): warning: variable "j" was declared but never referenced
+hw4.cu(405): warning: variable "j" was declared but never referenced
 
-hw4.cu(520): warning: integer conversion resulted in truncation
+hw4.cu(418): warning: variable "gtid" was declared but never referenced
 
-hw4.cu(648): warning: variable "nlz_target" was declared but never referenced
+hw4.cu(626): warning: variable "nlz_target" was declared but never referenced
 
-hw4.cu(95): warning: missing return statement at end of non-void function "decode"
+hw4.cu(705): warning: result of call is not used
 
-hw4.cu(112): warning: expression has no effect
+hw4.cu(797): warning: result of call is not used
 
-hw4.cu(112): warning: expression has no effect
-
-hw4.cu(362): warning: integer conversion resulted in truncation
-
-hw4.cu(520): warning: integer conversion resulted in truncation
-
+nvcc error   : 'cicc' died due to signal 2 
+make: *** [hw4] Error 2

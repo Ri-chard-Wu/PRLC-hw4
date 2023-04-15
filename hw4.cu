@@ -23,26 +23,28 @@ using namespace std;
 #define N_THRD_EXP (N_TSK_EXP - N_TSK_PER_THRD_EXP) // 18
 #define N_THRD_PER_BLK_EXP 7  
 
-#define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 2048 (2560 SM's)
-#define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 128
-#define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 16384
+// #define N_BLK (1 << (N_THRD_EXP - N_THRD_PER_BLK_EXP)) // 2048 (2560 SM's)
+// #define N_THRD_PER_BLK (1 << (N_THRD_PER_BLK_EXP)) // 128
+// #define N_TSK_PER_THRD (1 << (N_TSK_PER_THRD_EXP)) // 16384
+
+// 24 sec
+#define N_BLK 2048
+#define N_THRD_PER_BLK 64
+#define N_TSK_PER_THRD 32768
 
 // #define N_BLK 2560
-// #define N_THRD_PER_BLK 128
-// #define N_TSK_PER_THRD 13108
+// #define N_THRD_PER_BLK 64
+// #define N_TSK_PER_THRD 26215
 
 
-
-#define BASE_ADDR_RAW_BLKHDR (40960 >> 2)
-#define BASE_ADDR_BLKHDR_COMMON_SHA ((40960 + 80) >> 2)
-#define BASE_ADDR_TD ((40960 + 112) >> 2)
-#define BASE_ADDR_k ((40960 + 144) >> 2)
-#define BASE_ADDR_w ((40960 + 400) >> 2)
+#define SIZE_TOTAL_LSM (N_THRD_PER_BLK * 256)
+#define BASE_ADDR_RAW_BLKHDR (SIZE_TOTAL_LSM >> 2)
+#define BASE_ADDR_BLKHDR_COMMON_SHA ((SIZE_TOTAL_LSM + 80) >> 2)
+#define BASE_ADDR_TD ((SIZE_TOTAL_LSM + 112) >> 2)
+#define BASE_ADDR_k ((SIZE_TOTAL_LSM + 144) >> 2)
+#define BASE_ADDR_w ((SIZE_TOTAL_LSM + 400) >> 2)
 
 #define BASE_ADDR_THRD_LOCAL_SM 0
-#define SIZE_THRD_LOCAL_SM (320 >> 2)
-
-
 
 
 typedef struct
@@ -117,13 +119,25 @@ void convert_string_to_little_endian_bytes(unsigned char* out, char *in, size_t 
 
 
 
-// print out binary array (from highest value) in the hex format
-void print_hex(unsigned char* hex, size_t len)
+// // print out binary array (from highest value) in the hex format
+// void print_hex(unsigned char* hex, size_t len)
+// {
+//     for(int i=0;i<len;++i)
+//     {
+//         printf("%02x", hex[i]);
+//     }
+// }
+
+
+
+__device__ void print_hex(unsigned char* hex, size_t n_bytes)
 {
-    for(int i=0;i<len;++i)
+    printf("0x");
+    for(int i=n_bytes-1;i>=0;i--)
     {
         printf("%02x", hex[i]);
     }
+    
 }
 
 // print out binar array (from lowest value) in the hex format
@@ -393,36 +407,66 @@ void compute_w(byte_group_t *sm){
 __device__ 
 void sha256_stage1_dev(byte_group_t *sm, unsigned int nonce){
 
-	WORD i, j;
-    WORD a, b, c, d, e, f, g, h;
+	WORD i;
+    WORD a, b, c, d, e, f, g, h, t1, t2;
 
+    WORD *k = (WORD *)&sm[BASE_ADDR_k];
 
-    WORD *w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + 2048 + threadIdx.x];
+    WORD *w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x];
 
     #pragma unroll
     for(i=0; i<16; i++) w[N_THRD_PER_BLK * i] = ((WORD *)&sm[BASE_ADDR_w])[i];
-    
+    w[N_THRD_PER_BLK * 3] = nonce;
 
-    w[N_THRD_PER_BLK * 3] = (((BYTE *)&nonce)[0]<<24) | \
-                            (((BYTE *)&nonce)[1]<<16)| \
-                            (((BYTE *)&nonce)[2]<<8) | \
-                            (((BYTE *)&nonce)[3]);
+    // printf("%d -> %d\n", nonce, (_rotr(nonce, 7)) ^ (_rotr(nonce, 18)) ^ (nonce >> 3));
+
+
+
+    int gtid = blockIdx.x * blockDim.x + threadIdx.x;
 
 
     // ~ 2300 cycles
     #pragma unroll
 	for( i = 16; i < 64; ++i)
 	{
-    
+
+        // 16 <- 0, 1, 9, 14 
+        // 17 <- 1, 2, 10, 15
+        // 18* <- 2, 3*, 11, 16
+        // 19* <- 3*, 4, 12, 17 
+        // 20* <- 4, 5, 13, 18*
+        // 21* <- 5, 6, 14, 19*
+        // 22* <- 6, 7, 15, 20*
+        // 23* <- 7, 8, 16, 21*
+        // 24* <- 8, 9, 17, 22*
+        // 25* <- 9, 10, 18*, 23*
+
+
+        // clock_t start_time = clock(); 
+
+        c = w[N_THRD_PER_BLK * (i-16)];
         a = w[N_THRD_PER_BLK * (i-15)];
+        d = w[N_THRD_PER_BLK * (i-7)];
         b = w[N_THRD_PER_BLK * (i-2)];
         
 		WORD s0 = (_rotr(a, 7)) ^ (_rotr(a, 18)) ^ (a >> 3);
+
+        
+
 		WORD s1 = (_rotr(b, 17)) ^ (_rotr(b, 19)) ^ (b >> 10);
 
-		w[N_THRD_PER_BLK * i] = w[N_THRD_PER_BLK * (i-16)] + \
-                                    s0 + w[N_THRD_PER_BLK * (i-7)] + s1;
+		w[N_THRD_PER_BLK * i] = c + s0 + d + s1;
+
+
+        // clock_t stop_time = clock();
+        // int runtime = (int)(stop_time - start_time);
+        // if(gtid == 0){
+        //     printf("load sm dt: %d\n", runtime);
+        // }
+                
 	}
+
+
 
 
 	a = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[0];
@@ -436,40 +480,38 @@ void sha256_stage1_dev(byte_group_t *sm, unsigned int nonce){
 
 
     // ~ 3300 cycles
-	for(i=0; i < 64; ++i)
-	{
-		WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
-		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
-		WORD ch = (e & f) ^ ((~e) & g);
-		WORD maj = (a & b) ^ (a & c) ^ (b & c);
+	// for(i=0; i < 64; ++i)
+	// {
+	// 	WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
+	// 	WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
+	// 	WORD ch = (e & f) ^ ((~e) & g);
+	// 	WORD maj = (a & b) ^ (a & c) ^ (b & c);
 
-		WORD temp1 = h + S1 + ch + ((WORD *)&sm[BASE_ADDR_k])[i] + w[N_THRD_PER_BLK * i];
-        
-		WORD temp2 = S0 + maj;
+	// 	WORD temp1 = h + S1 + ch + ((WORD *)&sm[BASE_ADDR_k])[i] + w[N_THRD_PER_BLK * i];
+	// 	WORD temp2 = S0 + maj;
 		
-		h = g;
-		g = f;
-		f = e;
-		e = d + temp1;
-		d = c;
-		c = b;
-		b = a;
-		a = temp1 + temp2;
-	}
+	// 	h = g;
+	// 	g = f;
+	// 	f = e;
+	// 	e = d + temp1;
+	// 	d = c;
+	// 	c = b;
+	// 	b = a;
+	// 	a = temp1 + temp2;
+	// }
 
+    SHA256_COMPRESS_8X
 
-    byte_group_t *msg = &sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x];
-
-    // ~ 360 cycles
-	((WORD *)&msg[N_THRD_PER_BLK * 0])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[0] + a;
-	((WORD *)&msg[N_THRD_PER_BLK * 1])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[1] + b;
-	((WORD *)&msg[N_THRD_PER_BLK * 2])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[2] + c;
-	((WORD *)&msg[N_THRD_PER_BLK * 3])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[3] + d;
-	((WORD *)&msg[N_THRD_PER_BLK * 4])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[4] + e;
-	((WORD *)&msg[N_THRD_PER_BLK * 5])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[5] + f;
-	((WORD *)&msg[N_THRD_PER_BLK * 6])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[6] + g;
-	((WORD *)&msg[N_THRD_PER_BLK * 7])[0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[7] + h;
+	w[N_THRD_PER_BLK * 0] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[0] + a;
+	w[N_THRD_PER_BLK * 1] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[1] + b;
+	w[N_THRD_PER_BLK * 2] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[2] + c;
+	w[N_THRD_PER_BLK * 3] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[3] + d;
+	w[N_THRD_PER_BLK * 4] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[4] + e;
+	w[N_THRD_PER_BLK * 5] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[5] + f;
+	w[N_THRD_PER_BLK * 6] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[6] + g;
+	w[N_THRD_PER_BLK * 7] = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[7] + h;
     
+
 }
 
 
@@ -484,40 +526,30 @@ __device__
 void sha256_stage2_dev(byte_group_t *sm){
 	
 	WORD i;
-    WORD a, b, c, d, e, f, g, h;	
+    WORD a, b, c, d, e, f, g, h, t1, t2;	
 
-    byte_group_t *msg;
-    msg = &sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x];
+    WORD *k = (WORD *)&sm[BASE_ADDR_k];
 
-    WORD *w;
-    w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + 2048 + threadIdx.x];
-
-    ((WORD *)&msg[N_THRD_PER_BLK * 8])[0] = 0x80000000;  
-    ((WORD *)&msg[N_THRD_PER_BLK * 15])[0] = 0x00000100;  
+    WORD *w = (WORD *)&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x];
+    
+    w[N_THRD_PER_BLK * 8] = 0x80000000;  
+    w[N_THRD_PER_BLK * 15] = 0x00000100;  
 
     #pragma unroll
-	for(i=0; i < 9; ++i) w[N_THRD_PER_BLK * i] = ((WORD *)&msg[N_THRD_PER_BLK * i])[0];
-
-    #pragma unroll
-	for(; i < 15; ++i) w[N_THRD_PER_BLK * i] = 0;
-	
-    w[N_THRD_PER_BLK * i] = ((WORD *)&msg[N_THRD_PER_BLK * i])[0];
-
-
+	for(i = 9; i < 15; ++i) w[N_THRD_PER_BLK * i] = 0;
 
     #pragma unroll
 	for( i = 16; i < 64; ++i)
 	{
-		WORD s0 = (_rotr(w[N_THRD_PER_BLK * (i-15)], 7)) ^ \
-                  (_rotr(w[N_THRD_PER_BLK * (i-15)], 18)) ^ \
-                  (w[N_THRD_PER_BLK * (i-15)] >> 3);
+        c = w[N_THRD_PER_BLK * (i-16)];
+        a = w[N_THRD_PER_BLK * (i-15)];
+        d = w[N_THRD_PER_BLK * (i-7)];
+        b = w[N_THRD_PER_BLK * (i-2)];
 
-		WORD s1 = (_rotr(w[N_THRD_PER_BLK * (i-2)], 17)) ^ \
-                  (_rotr(w[N_THRD_PER_BLK * (i-2)], 19)) ^ \
-                  (w[N_THRD_PER_BLK * (i-2)] >> 10);
+		WORD s0 = (_rotr(a, 7)) ^ (_rotr(a, 18)) ^  (a >> 3);
+		WORD s1 = (_rotr(b, 17)) ^ (_rotr(b, 19)) ^ (b >> 10);
 
-		w[N_THRD_PER_BLK * i] = w[N_THRD_PER_BLK * (i-16)] + \
-                                    s0 + w[N_THRD_PER_BLK * (i-7)] + s1;
+		w[N_THRD_PER_BLK * i] = c + s0 + d + s1;
 	}
 
 
@@ -530,39 +562,45 @@ void sha256_stage2_dev(byte_group_t *sm){
 	g = 0x1f83d9ab;
 	h = 0x5be0cd19;
     
-	
-    // #pragma unroll
-	for(i=0;i<64;++i)
-	{
-		WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
+	    
+    // WORD a_and_b = a & b;
+    // WORD b_and_c = b & c;
+    // for(i=0; i < 64 ; ++i)
+	// {
+	// 	WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
+	// 	WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
+        
+	// 	WORD ch = (e & f) ^ ((~e) & g);
+    //     WORD maj = a_and_b ^ (a & c) ^ b_and_c;
 
-		WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
-		WORD ch = (e & f) ^ ((~e) & g);
-		WORD maj = (a & b) ^ (a & c) ^ (b & c);
-
-        WORD temp1 = h + S1 + ch + ((WORD *)&sm[BASE_ADDR_k])[i] + w[N_THRD_PER_BLK * i];
-
-		WORD temp2 = S0 + maj;
+    //     WORD temp1 = h + S1 + ch + ((WORD *)&sm[BASE_ADDR_k])[i] + w[N_THRD_PER_BLK * i];
+	// 	WORD temp2 = S0 + maj;
 		
-		h = g;
-		g = f;
-		f = e;
-		e = d + temp1;
-		d = c;
-		c = b;
-		b = a;
-		a = temp1 + temp2;
-	}
+	// 	h = g;
+	// 	g = f;
+	// 	f = e;
+	// 	e = d + temp1;
+	// 	d = c;
+	// 	c = b;
+	// 	b = a;
+	// 	a = temp1 + temp2;
+
+    //     b_and_c = a_and_b;
+    //     a_and_b = a & b;
+	// }
 
 
-	((WORD *)&msg[N_THRD_PER_BLK * 0])[0] = a + 0x6a09e667;
-	((WORD *)&msg[N_THRD_PER_BLK * 1])[0] = b + 0xbb67ae85;
-	((WORD *)&msg[N_THRD_PER_BLK * 2])[0] = c + 0x3c6ef372;
-	((WORD *)&msg[N_THRD_PER_BLK * 3])[0] = d + 0xa54ff53a;
-	((WORD *)&msg[N_THRD_PER_BLK * 4])[0] = e + 0x510e527f;
-	((WORD *)&msg[N_THRD_PER_BLK * 5])[0] = f + 0x9b05688c;
-	((WORD *)&msg[N_THRD_PER_BLK * 6])[0] = g + 0x1f83d9ab;
-	((WORD *)&msg[N_THRD_PER_BLK * 7])[0] = h + 0x5be0cd19;
+    SHA256_COMPRESS_8X
+
+
+	w[N_THRD_PER_BLK * 0] = a + 0x6a09e667;
+	w[N_THRD_PER_BLK * 1] = b + 0xbb67ae85;
+	w[N_THRD_PER_BLK * 2] = c + 0x3c6ef372;
+	w[N_THRD_PER_BLK * 3] = d + 0xa54ff53a;
+	w[N_THRD_PER_BLK * 4] = e + 0x510e527f;
+	w[N_THRD_PER_BLK * 5] = f + 0x9b05688c;
+	w[N_THRD_PER_BLK * 6] = g + 0x1f83d9ab;
+	w[N_THRD_PER_BLK * 7] = h + 0x5be0cd19;
 }
 
 
@@ -601,7 +639,7 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
     int tid = threadIdx.x;
     int nlz_target;
 
-    __shared__ byte_group_t sm[(40960 + 80 + 32 + 32 + 256 + 256) / 4];
+    __shared__ byte_group_t sm[(SIZE_TOTAL_LSM + 80 + 32 + 32 + 256 + 256) / 4];
 
     
     // clock_t start_time = clock(); 
@@ -625,7 +663,8 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
 
 
     if(tid == 0){
-        sha256_commonBlkhdr_dev((SHA256 *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA], (BYTE *)&sm[BASE_ADDR_RAW_BLKHDR]);
+        sha256_commonBlkhdr_dev((SHA256 *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA], 
+                                                (BYTE *)&sm[BASE_ADDR_RAW_BLKHDR]);
         compute_target_difficulty(sm);
         compute_w(sm);
     }
@@ -644,7 +683,12 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
         if(little_endian_bit_comparison_dev(&sm[BASE_ADDR_THRD_LOCAL_SM + threadIdx.x], 
                                 (BYTE *)&sm[BASE_ADDR_TD]) < 0)  
         {
-            *nonceValidDev = nonce;
+
+            *nonceValidDev = (((BYTE *)&nonce)[0]<<24) | \
+                                    (((BYTE *)&nonce)[1]<<16)| \
+                                    (((BYTE *)&nonce)[2]<<8) | \
+                                    (((BYTE *)&nonce)[3]);
+
             break;
         }     
     }
@@ -714,22 +758,16 @@ void solve(FILE *fin, FILE *fout)
 
 
 
-
-
-
-
-
-
-
-
     start = high_resolution_clock::now();
+   
     nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev); 
+
     cudaDeviceSynchronize();
     cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
+
     // while(!nonceValidHost){
     //     cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
     // }
-
 
     stop = high_resolution_clock::now();
     duration = duration_cast<microseconds>(stop - start);

@@ -215,20 +215,32 @@ __global__ void kernel()
 
 
 
-
+void print_hex(unsigned char* hex, size_t n_bytes)
+{
+    printf("0x");
+    for(int i=n_bytes-1;i>=0;i--)
+    {
+        printf("%02x", hex[i]);
+    }
+    
+}
 
 
 int main(int argc, char **argv)
 {
- 
-    auto start = high_resolution_clock::now();
     
-    kernel<<<1, N_THRD>>>(); 
-    cudaDeviceSynchronize();
+    unsigned int a = 0x34f6a4c5;
 
-    auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<microseconds>(stop - start);
-    cout<<" time: "<<duration.count() / 1000<<" ms"<<endl;
+    print_hex((unsigned char *)&a, 4);
+
+    // auto start = high_resolution_clock::now();
+    
+    // kernel<<<1, N_THRD>>>(); 
+    // cudaDeviceSynchronize();
+
+    // auto stop = high_resolution_clock::now();
+    // auto duration = duration_cast<microseconds>(stop - start);
+    // cout<<" time: "<<duration.count() / 1000<<" ms"<<endl;
 
     return 0;
 }
