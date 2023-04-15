@@ -234,8 +234,6 @@ void calc_merkle_root(unsigned char *root, int count, char **branch)
 __device__ 
 int little_endian_bit_comparison_dev(const byte_group_t *a, 
                                         const unsigned char *b){
-
-
     for(int i = 7; i >= 0; --i)
     {
         for(int j = 0; j <= 3; ++j){
@@ -441,29 +439,15 @@ void sha256_stage1_dev(byte_group_t *sm, unsigned int nonce){
         // 24* <- 8, 9, 17, 22*
         // 25* <- 9, 10, 18*, 23*
 
-
-        // clock_t start_time = clock(); 
-
         c = w[N_THRD_PER_BLK * (i-16)];
         a = w[N_THRD_PER_BLK * (i-15)];
         d = w[N_THRD_PER_BLK * (i-7)];
         b = w[N_THRD_PER_BLK * (i-2)];
         
 		WORD s0 = (_rotr(a, 7)) ^ (_rotr(a, 18)) ^ (a >> 3);
-
-        
-
 		WORD s1 = (_rotr(b, 17)) ^ (_rotr(b, 19)) ^ (b >> 10);
 
-		w[N_THRD_PER_BLK * i] = c + s0 + d + s1;
-
-
-        // clock_t stop_time = clock();
-        // int runtime = (int)(stop_time - start_time);
-        // if(gtid == 0){
-        //     printf("load sm dt: %d\n", runtime);
-        // }
-                
+		w[N_THRD_PER_BLK * i] = c + s0 + d + s1;     
 	}
 
 
@@ -477,28 +461,6 @@ void sha256_stage1_dev(byte_group_t *sm, unsigned int nonce){
 	f = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[5];
 	g = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[6];
 	h = ((WORD *)&sm[BASE_ADDR_BLKHDR_COMMON_SHA])[7];
-
-
-    // ~ 3300 cycles
-	// for(i=0; i < 64; ++i)
-	// {
-	// 	WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
-	// 	WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
-	// 	WORD ch = (e & f) ^ ((~e) & g);
-	// 	WORD maj = (a & b) ^ (a & c) ^ (b & c);
-
-	// 	WORD temp1 = h + S1 + ch + ((WORD *)&sm[BASE_ADDR_k])[i] + w[N_THRD_PER_BLK * i];
-	// 	WORD temp2 = S0 + maj;
-		
-	// 	h = g;
-	// 	g = f;
-	// 	f = e;
-	// 	e = d + temp1;
-	// 	d = c;
-	// 	c = b;
-	// 	b = a;
-	// 	a = temp1 + temp2;
-	// }
 
     SHA256_COMPRESS_8X
 
@@ -562,33 +524,6 @@ void sha256_stage2_dev(byte_group_t *sm){
 	g = 0x1f83d9ab;
 	h = 0x5be0cd19;
     
-	    
-    // WORD a_and_b = a & b;
-    // WORD b_and_c = b & c;
-    // for(i=0; i < 64 ; ++i)
-	// {
-	// 	WORD S0 = (_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22));
-	// 	WORD S1 = (_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25));
-        
-	// 	WORD ch = (e & f) ^ ((~e) & g);
-    //     WORD maj = a_and_b ^ (a & c) ^ b_and_c;
-
-    //     WORD temp1 = h + S1 + ch + ((WORD *)&sm[BASE_ADDR_k])[i] + w[N_THRD_PER_BLK * i];
-	// 	WORD temp2 = S0 + maj;
-		
-	// 	h = g;
-	// 	g = f;
-	// 	f = e;
-	// 	e = d + temp1;
-	// 	d = c;
-	// 	c = b;
-	// 	b = a;
-	// 	a = temp1 + temp2;
-
-    //     b_and_c = a_and_b;
-    //     a_and_b = a & b;
-	// }
-
 
     SHA256_COMPRESS_8X
 
@@ -632,7 +567,7 @@ void compute_target_difficulty(byte_group_t *sm){
 
 
 
-__global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValidDev)
+__global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValidDev, int d, int n)
 {
 
     int gtid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -675,7 +610,9 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
     unsigned int nonce;
     
 
-    for(nonce = gtid * N_TSK_PER_THRD; nonce < (gtid + 1) * N_TSK_PER_THRD; ++nonce) 
+    for(nonce = gtid * N_TSK_PER_THRD + (N_TSK_PER_THRD / d) * n; 
+        nonce < gtid * N_TSK_PER_THRD + (N_TSK_PER_THRD / d) * (n + 1); 
+        ++nonce) 
     {       
         sha256_stage1_dev(sm, nonce);
         sha256_stage2_dev(sm); 
@@ -757,23 +694,18 @@ void solve(FILE *fin, FILE *fout)
     cout<<"read tx & calc_merkle_root() time: "<<duration.count()/ 1000000.0 <<" sec"<<endl;
 
 
+    int d = 16;
 
-    start = high_resolution_clock::now();
-   
-    nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev); 
+    for(int i=0;i<d;i++){
 
-    cudaDeviceSynchronize();
-    cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
-
-    // while(!nonceValidHost){
-    //     cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
-    // }
-
-    stop = high_resolution_clock::now();
-    duration = duration_cast<microseconds>(stop - start);
-    cout<<"nonceSearch() time: "<<duration.count() / 1000000.0 <<" sec"<<endl;
-
+        nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev, d, i); 
+        cudaDeviceSynchronize();
+        cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
+        
+        if(nonceValidHost) break;     
+    }
     
+
     for(int i=0; i < 4; ++i)
     {
         fprintf(fout, "%02x", ((unsigned char *)&nonceValidHost)[i]);
@@ -781,7 +713,6 @@ void solve(FILE *fin, FILE *fout)
     fprintf(fout, "\n");
 
     
-
 
     delete[] merkle_branch;
     delete[] raw_merkle_branch;
