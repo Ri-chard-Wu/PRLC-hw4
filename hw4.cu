@@ -634,11 +634,15 @@ __global__ void nonceSearch(unsigned char *blockHeader, unsigned int *nonceValid
 
 
 
+    // auto start = high_resolution_clock::now();
 
-void solve(FILE *fin, FILE *fout)
-{
+    // auto stop = high_resolution_clock::now();
+    // auto duration = duration_cast<microseconds>(stop - start);
+    // cout<<"read tx & calc_merkle_root() time: "<<duration.count()/ 1000000.0 <<" sec"<<endl;
 
-    // **** read data *****
+
+void create_block(HashBlock *block, FILE *fin){
+
     char version[9];
     char prevhash[65];
     char ntime[9];
@@ -646,8 +650,6 @@ void solve(FILE *fin, FILE *fout)
     int tx;
     char *raw_merkle_branch;
     char **merkle_branch;
-
-
 
     getline(version, 9, fin);   
     getline(prevhash, 65, fin); 
@@ -658,7 +660,6 @@ void solve(FILE *fin, FILE *fout)
     raw_merkle_branch = new char [tx * 65];
     merkle_branch = new char *[tx];
 
-
     for(int i = 0; i < tx; ++i)
     {
         merkle_branch[i] = raw_merkle_branch + i * 65;
@@ -666,79 +667,101 @@ void solve(FILE *fin, FILE *fout)
         merkle_branch[i][64] = '\0';
     }
 
-
     unsigned char merkle_root[32];
     
-  
     calc_merkle_root(merkle_root, tx, merkle_branch);
 
-    HashBlock block;
-  
-    convert_string_to_little_endian_bytes((unsigned char *)&block.version, version, 8);
-    convert_string_to_little_endian_bytes(block.prevhash,                  prevhash,    64);
-    memcpy(block.merkle_root, merkle_root, 32);
-    convert_string_to_little_endian_bytes((unsigned char *)&block.nbits,   nbits,     8);
-    convert_string_to_little_endian_bytes((unsigned char *)&block.ntime,   ntime,     8);
-    block.nonce = 0;
-
-    unsigned char *blockHeaderDev;
-    unsigned int *nonceValidDev;
-    unsigned int nonceValidHost = 0;
-
-    cudaMalloc(&blockHeaderDev, BLK_HDR_SIZE);
-    cudaMemcpy(blockHeaderDev, (unsigned char*)&block,
-                         BLK_HDR_SIZE, cudaMemcpyHostToDevice);
-
-    cudaMalloc(&nonceValidDev, sizeof(int));
-    cudaMemset(nonceValidDev, 0, sizeof(int));
-    
-    // auto start = high_resolution_clock::now();
-
-    // auto stop = high_resolution_clock::now();
-    // auto duration = duration_cast<microseconds>(stop - start);
-    // cout<<"read tx & calc_merkle_root() time: "<<duration.count()/ 1000000.0 <<" sec"<<endl;
-
-
-
-    int d = 16, i;
-
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::srand(seed);
-    vector<int> vec;
-    for(int i=0;i<d;i++){ vec.push_back(i); }
-    std::random_shuffle(vec.begin(), vec.end());
-
-    // for(i=0;i<d;i++){
-
-    //     printf("v[i]: %d\n", vec[i]);
-    // }
-
-    for(i=0;i<d;i++){
-
-
-
-        nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev, d, vec[i]); 
-        cudaDeviceSynchronize();
-        cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
-        
-        if(nonceValidHost) break;     
-    }
-
-    // printf("n: %d\n", i);
-    
-
-    for(int i=0; i < 4; ++i)
-    {
-        fprintf(fout, "%02x", ((unsigned char *)&nonceValidHost)[i]);
-    }
-    fprintf(fout, "\n");
-
-    
+    convert_string_to_little_endian_bytes((unsigned char *)&(block->version), version, 8);
+    convert_string_to_little_endian_bytes(block->prevhash,                  prevhash,    64);
+    memcpy(block->merkle_root, merkle_root, 32);
+    convert_string_to_little_endian_bytes((unsigned char *)&(block->nbits),   nbits,     8);
+    convert_string_to_little_endian_bytes((unsigned char *)&(block->ntime),   ntime,     8);
+    block->nonce = 0;
 
     delete[] merkle_branch;
     delete[] raw_merkle_branch;
-    cudaFree(blockHeaderDev);
-    cudaFree(nonceValidDev);
+}
+
+
+void alloc_dev_mem(unsigned char **blockHeaderDev, unsigned int **nonceValidDev, HashBlock *block){
+
+    cudaMalloc(blockHeaderDev, BLK_HDR_SIZE);
+    cudaMemcpy(*blockHeaderDev, (unsigned char*)block, BLK_HDR_SIZE, cudaMemcpyHostToDevice);
+
+    cudaMalloc(nonceValidDev, sizeof(int));
+    cudaMemset(*nonceValidDev, 0, sizeof(int));
+
+}
+
+
+
+
+
+void solve(FILE *fin, FILE *fout, int totalblock)
+{
+
+    HashBlock block;
+
+    int curIdx = 0, nextIdx = 1, maxIdx = 2;
+    unsigned char *blockHeaderDev[maxIdx];
+    unsigned int *nonceValidDev[maxIdx];
+
+    unsigned int nonceValidHost = 0;
+
+    create_block(&block, fin);
+    alloc_dev_mem(&blockHeaderDev[curIdx], &nonceValidDev[curIdx], &block);
+
+
+    for(int i=0; i < totalblock; ++i)
+    {
+
+        int d = 8;
+        unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+        std::srand(seed);
+        vector<int> vec;
+        for(int i=0;i<d;i++){ vec.push_back(i); }
+        std::random_shuffle(vec.begin(), vec.end());
+
+
+        nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev[curIdx], 
+                                                        nonceValidDev[curIdx], d, vec[0]); 
+        
+        create_block(&block, fin);
+        alloc_dev_mem(&blockHeaderDev[nextIdx], &nonceValidDev[nextIdx], &block);
+
+        cudaDeviceSynchronize();
+        cudaMemcpy(&nonceValidHost, nonceValidDev[curIdx], sizeof(int), cudaMemcpyDeviceToHost);
+        
+
+        if(!nonceValidHost){
+            for(int i=1;i<d;i++){
+
+                nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev[curIdx],
+                                 nonceValidDev[curIdx], d, vec[i]); 
+
+                cudaDeviceSynchronize();
+                cudaMemcpy(&nonceValidHost, nonceValidDev[curIdx], sizeof(int), cudaMemcpyDeviceToHost);
+                
+                if(nonceValidHost) break;     
+            }
+        }
+
+
+        for(int i=0; i < 4; ++i)
+        {
+            fprintf(fout, "%02x", ((unsigned char *)&nonceValidHost)[i]);
+        }
+        fprintf(fout, "\n");
+
+        cudaFree(blockHeaderDev[curIdx]);
+        cudaFree(nonceValidDev[curIdx]);
+
+        curIdx = nextIdx;
+        nextIdx = (nextIdx + 1) % maxIdx;
+
+    }
+
+
 }
 
 
@@ -765,10 +788,9 @@ int main(int argc, char **argv)
     fscanf(fin, "%d\n", &totalblock);
     fprintf(fout, "%d\n", totalblock);
 
-    for(int i=0; i < totalblock; ++i)
-    {
-        solve(fin, fout);
-    }
+
+    solve(fin, fout, totalblock);
+    
 
     return 0;
 }
