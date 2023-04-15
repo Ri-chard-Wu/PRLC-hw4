@@ -13,7 +13,8 @@
 #include <cstring>
 #include <cassert>
 #include <chrono>
-
+#include <algorithm>
+#include <vector>
 #include "sha256.h"
 using namespace std::chrono;
 using namespace std;
@@ -647,7 +648,6 @@ void solve(FILE *fin, FILE *fout)
     char **merkle_branch;
 
 
-    auto start = high_resolution_clock::now();
 
     getline(version, 9, fin);   
     getline(prevhash, 65, fin); 
@@ -658,6 +658,7 @@ void solve(FILE *fin, FILE *fout)
     raw_merkle_branch = new char [tx * 65];
     merkle_branch = new char *[tx];
 
+
     for(int i = 0; i < tx; ++i)
     {
         merkle_branch[i] = raw_merkle_branch + i * 65;
@@ -665,8 +666,10 @@ void solve(FILE *fin, FILE *fout)
         merkle_branch[i][64] = '\0';
     }
 
+
     unsigned char merkle_root[32];
     
+  
     calc_merkle_root(merkle_root, tx, merkle_branch);
 
     HashBlock block;
@@ -689,21 +692,39 @@ void solve(FILE *fin, FILE *fout)
     cudaMalloc(&nonceValidDev, sizeof(int));
     cudaMemset(nonceValidDev, 0, sizeof(int));
     
-    auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<microseconds>(stop - start);
-    cout<<"read tx & calc_merkle_root() time: "<<duration.count()/ 1000000.0 <<" sec"<<endl;
+    // auto start = high_resolution_clock::now();
+
+    // auto stop = high_resolution_clock::now();
+    // auto duration = duration_cast<microseconds>(stop - start);
+    // cout<<"read tx & calc_merkle_root() time: "<<duration.count()/ 1000000.0 <<" sec"<<endl;
 
 
-    int d = 16;
 
-    for(int i=0;i<d;i++){
+    int d = 16, i;
 
-        nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev, d, i); 
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::srand(seed);
+    vector<int> vec;
+    for(int i=0;i<d;i++){ vec.push_back(i); }
+    std::random_shuffle(vec.begin(), vec.end());
+
+    // for(i=0;i<d;i++){
+
+    //     printf("v[i]: %d\n", vec[i]);
+    // }
+
+    for(i=0;i<d;i++){
+
+
+
+        nonceSearch<<< N_BLK, N_THRD_PER_BLK >>> (blockHeaderDev, nonceValidDev, d, vec[i]); 
         cudaDeviceSynchronize();
         cudaMemcpy(&nonceValidHost, nonceValidDev, sizeof(int), cudaMemcpyDeviceToHost);
         
         if(nonceValidHost) break;     
     }
+
+    // printf("n: %d\n", i);
     
 
     for(int i=0; i < 4; ++i)
@@ -716,6 +737,8 @@ void solve(FILE *fin, FILE *fout)
 
     delete[] merkle_branch;
     delete[] raw_merkle_branch;
+    cudaFree(blockHeaderDev);
+    cudaFree(nonceValidDev);
 }
 
 

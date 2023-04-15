@@ -1,20 +1,36 @@
-hw4.cu(92): warning: missing return statement at end of non-void function "decode"
+hw4.cu(98): warning: missing return statement at end of non-void function "decode"
 
-hw4.cu(109): warning: expression has no effect
+hw4.cu(115): warning: expression has no effect
 
-hw4.cu(109): warning: expression has no effect
+hw4.cu(115): warning: expression has no effect
 
-hw4.cu(371): warning: integer conversion resulted in truncation
+hw4.cu(375): warning: integer conversion resulted in truncation
 
-hw4.cu(405): warning: variable "j" was declared but never referenced
+hw4.cu(424): warning: variable "gtid" was declared but never referenced
 
-hw4.cu(418): warning: variable "gtid" was declared but never referenced
+hw4.cu(576): warning: variable "nlz_target" was declared but never referenced
 
-hw4.cu(626): warning: variable "nlz_target" was declared but never referenced
+hw4.cu(656): warning: result of call is not used
 
-hw4.cu(705): warning: result of call is not used
+hw4.cu(765): warning: result of call is not used
 
-hw4.cu(797): warning: result of call is not used
+hw4.cu(98): warning: missing return statement at end of non-void function "decode"
 
-nvcc error   : 'cicc' died due to signal 2 
-make: *** [hw4] Error 2
+hw4.cu(115): warning: expression has no effect
+
+hw4.cu(115): warning: expression has no effect
+
+hw4.cu(375): warning: integer conversion resulted in truncation
+
+hw4.cu(656): warning: result of call is not used
+
+hw4.cu(765): warning: result of call is not used
+
+hw4.cu: In function 'void solve(FILE*, FILE*)':
+hw4.cu:656:7: warning: ignoring return value of 'int fscanf(FILE*, const char*, ...)', declared with attribute warn_unused_result [-Wunused-result]
+     fscanf(fin, "%d\n", &tx);
+     ~~^~~~~~~~~~~~~~~~~~
+hw4.cu: In function 'int main(int, char**)':
+hw4.cu:765:7: warning: ignoring return value of 'int fscanf(FILE*, const char*, ...)', declared with attribute warn_unused_result [-Wunused-result]
+     fscanf(fin, "%d\n", &totalblock);
+     ~~^~~~~~~~~~~~~~~~~~~~~~~~~~

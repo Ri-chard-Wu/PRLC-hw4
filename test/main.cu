@@ -225,13 +225,27 @@ void print_hex(unsigned char* hex, size_t n_bytes)
     
 }
 
+#include <algorithm>
+#include <vector>
 
 int main(int argc, char **argv)
 {
-    
-    unsigned int a = 0x34f6a4c5;
+    // int nums[9] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    vector<int> vec;
+    for(int i=0;i<9;i++){
+        vec.push_back(i);
+    }
 
-    print_hex((unsigned char *)&a, 4);
+    std::random_shuffle(vec.begin(), vec.end());
+
+    for(int i=0;i<9;i++){
+        printf("%d\n", vec[i]);
+    }
+
+
+    // unsigned int a = 0x34f6a4c5;
+
+    // print_hex((unsigned char *)&a, 4);
 
     // auto start = high_resolution_clock::now();
     
